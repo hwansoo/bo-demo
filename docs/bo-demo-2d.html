@@ -2,85 +2,256 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>2D Bayesian Optimization Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D 베이지안 최적화 시각화</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f0f2f5; }
-        .dashboard { display: grid; grid-template-columns: 300px 1fr; gap: 20px; max-width: 1400px; margin: 0 auto; }
-        
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --bg-main: #f8fafc;
+            --bg-card: #ffffff;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --accent: #f1f5f9;
+            --success: #10b981;
+            --danger: #ef4444;
+        }
+
+        body { 
+            font-family: 'Inter', 'Noto Sans KR', sans-serif; 
+            margin: 0; padding: 0; 
+            background-color: var(--bg-main); 
+            color: var(--text-main);
+            line-height: 1.6;
+        }
+
+        .header { 
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            color: white; 
+            padding: 30px 20px; 
+            text-align: center;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .header h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; }
+
+        .dashboard { 
+            display: grid; 
+            grid-template-columns: 320px 1fr; 
+            gap: 24px; 
+            max-width: 1500px; 
+            margin: -20px auto 40px; 
+            padding: 0 20px;
+        }
+
         /* 왼쪽 컨트롤 패널 */
-        .sidebar { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); height: fit-content; }
-        .sidebar h2 { margin-top: 0; color: #333; font-size: 20px; }
-        .control-group { margin-bottom: 20px; }
-        .control-group label { display: block; font-weight: bold; margin-bottom: 8px; color: #555; }
-        .checkbox-group { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; }
-        .checkbox-group label { margin-bottom: 0; font-weight: normal; cursor: pointer; }
-        .checkbox-group input { width: auto; cursor: pointer; transform: scale(1.2); }
-        
-        select, input[type="range"] { width: 100%; padding: 8px; box-sizing: border-box; }
-        button { width: 100%; padding: 12px; font-size: 16px; font-weight: bold; color: white; background-color: #4CAF50; border: none; border-radius: 6px; cursor: pointer; transition: background 0.3s; margin-bottom: 10px; }
-        button:hover { background-color: #45a049; }
-        .btn-restart { background-color: #f44336; }
-        .btn-restart:hover { background-color: #da190b; }
-        .stats { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 20px; border: 1px solid #ddd; }
-        
+        .sidebar { 
+            background: var(--bg-card); 
+            padding: 30px; 
+            border-radius: 16px; 
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); 
+            height: fit-content;
+            border: 1px solid var(--border);
+            position: sticky;
+            top: 20px;
+        }
+        .sidebar h2 { 
+            margin-top: 0; 
+            color: var(--text-main); 
+            font-size: 18px; 
+            font-weight: 700;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .sidebar h2::before {
+            content: '';
+            display: inline-block;
+            width: 4px;
+            height: 20px;
+            background: var(--primary);
+            border-radius: 2px;
+        }
+
+        .control-group { margin-bottom: 24px; }
+        .control-group label { 
+            display: block; 
+            font-weight: 600; 
+            margin-bottom: 10px; 
+            color: var(--text-main);
+            font-size: 14px;
+        }
+
+        .checkbox-group { 
+            display: flex; 
+            align-items: center; 
+            gap: 10px; 
+            margin-bottom: 25px; 
+            padding: 12px;
+            background: var(--accent);
+            border-radius: 10px;
+            cursor: pointer;
+        }
+        .checkbox-group label { margin-bottom: 0; font-weight: 600; font-size: 14px; cursor: pointer; color: var(--text-main); }
+        .checkbox-group input { width: auto; cursor: pointer; accent-color: var(--primary); transform: scale(1.1); }
+
+        select { 
+            width: 100%; 
+            padding: 10px 12px; 
+            border-radius: 8px; 
+            border: 1px solid var(--border); 
+            background-color: white;
+            font-size: 14px;
+            color: var(--text-main);
+            outline: none;
+            cursor: pointer;
+        }
+
+        input[type="range"] { 
+            width: 100%; 
+            accent-color: var(--primary);
+            cursor: pointer;
+        }
+
+        button { 
+            width: 100%; 
+            padding: 14px; 
+            font-size: 15px; 
+            font-weight: 700; 
+            color: white; 
+            background-color: var(--primary); 
+            border: none; 
+            border-radius: 10px; 
+            cursor: pointer; 
+            transition: all 0.2s;
+            margin-bottom: 12px;
+            box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
+        }
+        button:hover { background-color: var(--primary-hover); transform: translateY(-1px); box-shadow: 0 6px 10px -1px rgba(37, 99, 235, 0.3); }
+        button:active { transform: translateY(0); }
+
+        .btn-restart { 
+            background-color: white; 
+            color: var(--text-muted); 
+            border: 1px solid var(--border);
+            box-shadow: none;
+        }
+        .btn-restart:hover { 
+            background-color: var(--accent); 
+            color: var(--danger);
+            border-color: var(--danger);
+            box-shadow: none;
+        }
+
+        .stats { 
+            background: var(--accent); 
+            padding: 18px; 
+            border-radius: 12px; 
+            margin-top: 15px; 
+            border: 1px solid var(--border); 
+        }
+        .stats p { margin: 8px 0; font-size: 14px; color: var(--text-muted); font-weight: 500; }
+        .stats span { color: var(--primary); font-weight: 700; font-size: 15px; }
+
         /* 오른쪽 차트 그리드 */
-        .chart-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 15px; }
-        .chart-container { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 10px; }
-        .chart-title { text-align: center; font-weight: bold; margin-bottom: 5px; color: #333; }
-        .plot { width: 100%; height: 350px; }
+        .chart-grid { 
+            display: grid; 
+            grid-template-columns: repeat(2, 1fr); 
+            gap: 20px; 
+        }
+        .chart-container { 
+            background: var(--bg-card); 
+            border-radius: 16px; 
+            box-shadow: 0 4px 15px -3px rgba(0,0,0,0.05); 
+            padding: 20px; 
+            border: 1px solid var(--border);
+            transition: transform 0.2s;
+        }
+        .chart-container:hover { transform: translateY(-2px); }
+        .chart-title { 
+            text-align: left; 
+            font-weight: 700; 
+            margin-bottom: 15px; 
+            color: var(--text-main); 
+            font-size: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .chart-title::before {
+            content: '';
+            width: 3px;
+            height: 14px;
+            background: var(--primary);
+            border-radius: 2px;
+        }
+        .plot { width: 100%; height: 380px; }
+
+        @media (max-width: 1024px) {
+            .dashboard { grid-template-columns: 1fr; }
+            .sidebar { position: static; }
+        }
     </style>
 </head>
 <body>
 
+<div class="header">
+    <h1>2D 베이지안 최적화 공간 탐색 데모</h1>
+</div>
+
 <div class="dashboard">
     <div class="sidebar">
-        <h2>2D BO Controls</h2>
-        
+        <h2>탐색 컨트롤러</h2>
+
         <div class="control-group">
-            <label for="afSelect">Acquisition Function:</label>
+            <label for="afSelect">획득 함수 (Acquisition):</label>
             <select id="afSelect" onchange="updateCharts()">
-                <option value="UCB">UCB (Upper Conf. Bound)</option>
+                <option value="UCB">UCB (Upper Confidence Bound)</option>
                 <option value="EI">EI (Expected Improvement)</option>
-                <option value="PI">PI (Prob. of Improvement)</option>
+                <option value="PI">PI (Probability of Improvement)</option>
             </select>
         </div>
-        
+
         <div class="control-group">
-            <label for="kappaSlider"><span id="paramLabel">Exploration Param (κ):</span> <span id="paramValue">2.0</span></label>
+            <label for="kappaSlider"><span id="paramLabel">탐색 파라미터 (κ):</span> <span id="paramValue" style="color: var(--primary); font-weight: 700;">2.0</span></label>
             <input type="range" id="kappaSlider" min="0" max="5" step="0.1" value="2.0" oninput="updateCharts()">
         </div>
 
-        <div class="checkbox-group">
-            <input type="checkbox" id="showLinesCheck" checked onchange="updateCharts()">
-            <label for="showLinesCheck"><strong>등고선 선 표시</strong></label>
+        <div class="checkbox-group" onclick="document.getElementById('showLinesCheck').click()">
+            <input type="checkbox" id="showLinesCheck" checked onchange="updateCharts()" onclick="event.stopPropagation()">
+            <label for="showLinesCheck">등고선 선 표시 (Contour Lines)</label>
         </div>
 
-        <button id="nextBtn" onclick="sampleNextPoint()">선정된 다음 관측점 추가</button>
-        <button class="btn-restart" onclick="restart()">새로 시작 (Restart)</button>
+        <button id="nextBtn" onclick="sampleNextPoint()">다음 추천 위치 관측하기</button>
+        <button class="btn-restart" onclick="restart()">전체 초기화 (Restart)</button>
 
         <div class="stats">
-            <p><strong>관측 횟수:</strong> <span id="statCount">0</span></p>
-            <p><strong>발견된 최적값 (Z):</strong> <span id="statBest">0.000</span></p>
+            <p>관측 횟수: <span id="statCount">0</span>회</p>
+            <p>현재 최고 성능 (Z): <span id="statBest">0.000</span></p>
         </div>
     </div>
 
     <div class="chart-grid">
         <div class="chart-container">
-            <div class="chart-title">Target Function (Unknown)</div>
+            <div class="chart-title">목표 함수 (실제 데이터 지형)</div>
             <div id="plot-true" class="plot"></div>
         </div>
         <div class="chart-container">
-            <div class="chart-title">Surrogate Model (Mean)</div>
+            <div class="chart-title">예측 모델 (AI가 추론한 평균값)</div>
             <div id="plot-mean" class="plot"></div>
         </div>
         <div class="chart-container">
-            <div class="chart-title">Surrogate Model (Variance)</div>
+            <div class="chart-title">예측 오차 (불확실성 분포)</div>
             <div id="plot-var" class="plot"></div>
         </div>
         <div class="chart-container">
-            <div class="chart-title">Acquisition Function</div>
+            <div class="chart-title">획득 함수 점수 (다음 실험 위치 추천)</div>
             <div id="plot-acq" class="plot"></div>
         </div>
     </div>
@@ -91,7 +262,7 @@
     const gridSize = 35;
     const x_linspace = Array.from({length: gridSize}, (_, i) => i * 10 / (gridSize - 1));
     const y_linspace = Array.from({length: gridSize}, (_, i) => i * 10 / (gridSize - 1));
-    
+
     let true_function;
     let Z_true = [];
     let X_train = [];
@@ -116,7 +287,7 @@
 
     function restart() {
         true_function = generateRandomTrueFunction();
-        
+
         Z_true = [];
         for (let j = 0; j < gridSize; j++) {
             let row = [];
@@ -169,7 +340,7 @@
             let mean_row = [];
             let std_row = [];
             const y_test = y_linspace[j];
-            
+
             for (let i = 0; i < gridSize; i++) {
                 const x_test = x_linspace[i];
                 const pt = [x_test, y_test];
@@ -178,7 +349,7 @@
                 for (let n = 0; n < N; n++) {
                     k_star.push(kernel(pt, X_train[n]));
                 }
-                
+
                 let k_star_mat = math.matrix([k_star]);
                 let mu = math.multiply(k_star_mat, alpha).get([0, 0]);
                 mean_row.push(mu);
@@ -200,12 +371,12 @@
         const afType = document.getElementById('afSelect').value;
         const paramValue = parseFloat(document.getElementById('kappaSlider').value);
         const showLines = document.getElementById('showLinesCheck').checked;
-        
+
         document.getElementById('paramValue').innerText = paramValue.toFixed(2);
         document.getElementById('paramLabel').innerText = afType === 'UCB' ? '탐색 파라미터 (κ):' : '탐색 파라미터 (ξ):';
 
         const y_best = Math.max(...Y_train);
-        
+
         document.getElementById('statCount').innerText = X_train.length;
         document.getElementById('statBest').innerText = y_best.toFixed(4);
 
@@ -254,7 +425,7 @@
             }, 
             type: 'scatter' 
         };
-        
+
         const next_trace = { x: [next_candidate[0]], y: [next_candidate[1]], mode: 'markers', marker: {color: 'red', size: 14, symbol: 'star'}, type: 'scatter' };
 
         // ★ 버그 수정: 선 두께(width)를 0으로 설정하여 선을 완전히 숨김

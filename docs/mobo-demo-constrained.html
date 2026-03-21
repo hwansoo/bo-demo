@@ -2,86 +2,256 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>Constrained Bayesian Optimization Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>제약 조건 베이지안 최적화 데모</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f4f6f9; }
-        .dashboard { display: grid; grid-template-columns: 320px 1fr; gap: 20px; max-width: 1500px; margin: 0 auto; }
-        
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --bg-main: #f8fafc;
+            --bg-card: #ffffff;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --accent: #f1f5f9;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning-bg: #fffbeb;
+            --warning-border: #fde68a;
+            --warning-text: #92400e;
+        }
+
+        body { 
+            font-family: 'Inter', 'Noto Sans KR', sans-serif; 
+            margin: 0; padding: 0; 
+            background-color: var(--bg-main); 
+            color: var(--text-main);
+            line-height: 1.6;
+        }
+
+        .header { 
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            color: white; 
+            padding: 30px 20px; 
+            text-align: center;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .header h1 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; }
+
+        .dashboard { 
+            display: grid; 
+            grid-template-columns: 320px 1fr; 
+            gap: 24px; 
+            max-width: 1500px; 
+            margin: -20px auto 40px; 
+            padding: 0 20px;
+        }
+
         /* 왼쪽 컨트롤 패널 */
-        .sidebar { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); height: fit-content; }
-        .sidebar h2 { margin-top: 0; color: #2c3e50; font-size: 20px; margin-bottom: 5px; }
-        .subtitle { color: #7f8c8d; font-size: 13px; margin-bottom: 20px; }
-        
-        .control-group { margin-bottom: 15px; }
-        .control-group label { display: block; font-weight: bold; margin-bottom: 8px; color: #34495e; }
-        
-        .constraint-box { background: #fff5e6; padding: 15px; border-radius: 8px; border: 1px solid #ffe0b2; margin-bottom: 20px; }
-        .constraint-box label { color: #e65100; margin-bottom: 10px; }
-        .constraint-box small { color: #e64a19; display: block; margin-top: 8px; line-height: 1.4; }
-        
-        select, input[type="range"] { width: 100%; padding: 8px; box-sizing: border-box; }
-        button { width: 100%; padding: 12px; font-size: 15px; font-weight: bold; color: white; background-color: #3498db; border: none; border-radius: 6px; cursor: pointer; transition: background 0.3s; margin-bottom: 10px; }
-        button:hover { background-color: #2980b9; }
-        .btn-restart { background-color: #95a5a6; }
-        .btn-restart:hover { background-color: #7f8c8d; }
-        
-        .legend-box { background: #f8f9fa; padding: 12px; border-radius: 8px; margin-top: 15px; border: 1px solid #ddd; font-size: 13px; line-height: 1.6; }
-        .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
-        .dot-green { background-color: #4CAF50; }
-        .dot-red { background-color: #F44336; }
-        
+        .sidebar { 
+            background: var(--bg-card); 
+            padding: 30px; 
+            border-radius: 16px; 
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); 
+            height: fit-content;
+            border: 1px solid var(--border);
+            position: sticky;
+            top: 20px;
+        }
+        .sidebar h2 { 
+            margin-top: 0; 
+            color: var(--text-main); 
+            font-size: 18px; 
+            font-weight: 700;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .sidebar h2::before {
+            content: '';
+            display: inline-block;
+            width: 4px;
+            height: 20px;
+            background: var(--primary);
+            border-radius: 2px;
+        }
+        .subtitle { color: var(--text-muted); font-size: 13px; margin-bottom: 25px; font-weight: 500; }
+
+        .constraint-box { 
+            background: var(--warning-bg); 
+            padding: 20px; 
+            border-radius: 12px; 
+            border: 1px solid var(--warning-border); 
+            margin-bottom: 25px; 
+        }
+        .constraint-box label { 
+            color: var(--warning-text); 
+            margin-bottom: 12px; 
+            display: block; 
+            font-weight: 700;
+            font-size: 14px;
+        }
+        .constraint-box small { 
+            color: var(--text-muted); 
+            display: block; 
+            margin-top: 12px; 
+            line-height: 1.5; 
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .control-group { margin-bottom: 24px; }
+        .control-group label { 
+            display: block; 
+            font-weight: 600; 
+            margin-bottom: 10px; 
+            color: var(--text-main);
+            font-size: 14px;
+        }
+
+        input[type="range"] { 
+            width: 100%; 
+            accent-color: var(--primary);
+            cursor: pointer;
+        }
+
+        button { 
+            width: 100%; 
+            padding: 14px; 
+            font-size: 15px; 
+            font-weight: 700; 
+            color: white; 
+            background-color: var(--primary); 
+            border: none; 
+            border-radius: 10px; 
+            cursor: pointer; 
+            transition: all 0.2s;
+            margin-bottom: 12px;
+            box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
+        }
+        button:hover { background-color: var(--primary-hover); transform: translateY(-1px); box-shadow: 0 6px 10px -1px rgba(37, 99, 235, 0.3); }
+        button:active { transform: translateY(0); }
+
+        .btn-restart { 
+            background-color: white; 
+            color: var(--text-muted); 
+            border: 1px solid var(--border);
+            box-shadow: none;
+        }
+        .btn-restart:hover { 
+            background-color: var(--accent); 
+            color: var(--text-main);
+            border-color: var(--text-muted);
+            box-shadow: none;
+        }
+
+        .legend-box { 
+            background: var(--accent); 
+            padding: 18px; 
+            border-radius: 12px; 
+            margin-top: 15px; 
+            border: 1px solid var(--border); 
+            font-size: 13px;
+            line-height: 1.8;
+        }
+        .legend-box strong { display: block; margin-bottom: 8px; color: var(--text-main); }
+        .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
+        .dot-green { background-color: var(--success); box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2); }
+        .dot-red { background-color: var(--danger); box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2); }
+
         /* 오른쪽 차트 그리드 */
-        .chart-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 15px; }
-        .chart-container { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); padding: 10px; }
-        .chart-title { text-align: center; font-weight: bold; margin-bottom: 5px; color: #2c3e50; }
-        .plot { width: 100%; height: 320px; }
+        .chart-grid { 
+            display: grid; 
+            grid-template-columns: repeat(2, 1fr); 
+            gap: 20px; 
+        }
+        .chart-container { 
+            background: var(--bg-card); 
+            border-radius: 16px; 
+            box-shadow: 0 4px 15px -3px rgba(0,0,0,0.05); 
+            padding: 20px; 
+            border: 1px solid var(--border);
+            transition: transform 0.2s;
+        }
+        .chart-container:hover { transform: translateY(-2px); }
+        .chart-title { 
+            text-align: left; 
+            font-weight: 700; 
+            margin-bottom: 15px; 
+            color: var(--text-main); 
+            font-size: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .chart-title::before {
+            content: '';
+            width: 3px;
+            height: 14px;
+            background: var(--primary);
+            border-radius: 2px;
+        }
+        .plot { width: 100%; height: 340px; }
+
+        @media (max-width: 1024px) {
+            .dashboard { grid-template-columns: 1fr; }
+            .sidebar { position: static; }
+        }
     </style>
 </head>
 <body>
 
+<div class="header">
+    <h1>제약 조건 베이지안 최적화 시각화 데모</h1>
+</div>
+
 <div class="dashboard">
     <div class="sidebar">
-        <h2>Constrained BO</h2>
-        <div class="subtitle">Maximize Objective s.t. Constraint ≥ T</div>
-        
+        <h2>탐색 컨트롤러</h2>
+        <div class="subtitle">Maximize f₁(x) s.t. f₂(x) ≥ T</div>
+
         <div class="constraint-box">
-            <label for="thresholdSlider"><strong>제약 조건 임계값 (Threshold T):</strong> <span id="threshValue">2.0</span></label>
+            <label for="thresholdSlider">제약 임계값 (Threshold T): <span id="threshValue" style="color: var(--danger);">2.0</span></label>
             <input type="range" id="thresholdSlider" min="0" max="4.5" step="0.5" value="2.0" oninput="updateCharts()">
-            <small>f₂(x)가 이 값 이상이어야만 '유효한(Feasible)' 설계로 인정됩니다.</small>
+            <small>f₂(x)가 이 값 이상이어야만 유효한 설계(Feasible)로 간주됩니다.</small>
         </div>
 
         <div class="control-group">
-            <label for="kappaSlider">탐색 파라미터 (κ): <span id="kappaValue">2.0</span></label>
+            <label for="kappaSlider">탐색 파라미터 (κ): <span id="kappaValue" style="color: var(--primary); font-weight: 700;">2.0</span></label>
             <input type="range" id="kappaSlider" min="0" max="5" step="0.1" value="2.0" oninput="updateCharts()">
         </div>
 
-        <button id="nextBtn" onclick="sampleNextPoint()">선정된 다음 관측점 추가</button>
-        <button class="btn-restart" onclick="restart()">새로 시작 (Restart)</button>
+        <button id="nextBtn" onclick="sampleNextPoint()">다음 추천 위치 관측하기</button>
+        <button class="btn-restart" onclick="restart()">전체 초기화 (Restart)</button>
 
         <div class="legend-box">
-            <strong>관측점 상태 표시:</strong><br>
-            <span class="dot dot-green"></span>조건 만족 (Feasible: f₂ ≥ T)<br>
-            <span class="dot dot-red"></span>조건 위반 (Infeasible: f₂ < T)
+            <strong>관측점 상태 범례</strong>
+            <div><span class="dot dot-green"></span>조건 만족 (Feasible)</div>
+            <div><span class="dot dot-red"></span>조건 위반 (Infeasible)</div>
         </div>
     </div>
 
     <div class="chart-grid">
         <div class="chart-container">
-            <div class="chart-title" style="color:#1976D2;">1. GP Model: Objective f₁(x)</div>
+            <div class="chart-title" style="color: var(--primary);">1. 목표 함수: f₁(x)</div>
             <div id="plot-f1" class="plot"></div>
         </div>
         <div class="chart-container">
-            <div class="chart-title" style="color:#E64A19;">2. GP Model: Constraint f₂(x)</div>
+            <div class="chart-title" style="color: var(--f2-color);">2. 제약 함수: f₂(x)</div>
             <div id="plot-f2" class="plot"></div>
         </div>
         <div class="chart-container">
-            <div class="chart-title" style="color:#9C27B0;">3. Probability of Feasibility (PoF)</div>
+            <div class="chart-title" style="color: #8b5cf6;">3. 제약 만족 확률 (PoF)</div>
             <div id="plot-pof" class="plot"></div>
         </div>
         <div class="chart-container">
-            <div class="chart-title" style="color:#388E3C;">4. Constrained Acquisition (Acq × PoF)</div>
+            <div class="chart-title" style="color: var(--success);">4. 최종 획득 함수 (Acq × PoF)</div>
             <div id="plot-acq" class="plot"></div>
         </div>
     </div>
@@ -180,38 +350,38 @@
         next_x_candidate = X_test[max_index];
 
         // 관측점의 성공/실패 색상 분류
-        let color_feasible = '#4CAF50'; // Green
-        let color_infeasible = '#F44336'; // Red
+        let color_feasible = '#10b981'; // Green
+        let color_infeasible = '#ef4444'; // Red
         let marker_colors = Y2_train.map(y2 => y2 >= threshold ? color_feasible : color_infeasible);
 
         const layout_common = { margin: {l: 40, r: 20, b: 30, t: 10}, xaxis: {title: 'Input X'}, showlegend: false };
 
         // [차트 1] Objective Model
-        const trace_true1 = { x: X_test, y: Y1_true, mode: 'lines', line: { dash: 'dash', color: 'rgba(0,0,0,0.3)' } };
-        const trace_mean1 = { x: X_test, y: gp1.mean, mode: 'lines', line: { color: '#1976D2' } };
+        const trace_true1 = { x: X_test, y: Y1_true, mode: 'lines', line: { dash: 'dash', color: 'rgba(0,0,0,0.2)' } };
+        const trace_mean1 = { x: X_test, y: gp1.mean, mode: 'lines', line: { color: '#2563eb' } };
         const trace_upper1 = { x: X_test, y: gp1.mean.map((m,i)=>m+2*gp1.std[i]), type: 'scatter', mode: 'lines', line: {width:0} };
-        const trace_lower1 = { x: X_test, y: gp1.mean.map((m,i)=>m-2*gp1.std[i]), type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(25, 118, 210, 0.2)', line: {width:0} };
-        const trace_obs1 = { x: X_train, y: Y1_train, mode: 'markers', marker: { color: marker_colors, size: 10, line: {color:'black', width:1} } };
-        const trace_next1 = { x: [next_x_candidate], y: [gp1.mean[max_index]], mode: 'markers', marker: { symbol: 'star', color: 'blue', size: 14 } };
+        const trace_lower1 = { x: X_test, y: gp1.mean.map((m,i)=>m-2*gp1.std[i]), type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(37, 99, 235, 0.1)', line: {width:0} };
+        const trace_obs1 = { x: X_train, y: Y1_train, mode: 'markers', marker: { color: marker_colors, size: 10, line: {color:'white', width:2} } };
+        const trace_next1 = { x: [next_x_candidate], y: [gp1.mean[max_index]], mode: 'markers', marker: { symbol: 'star', color: 'red', size: 14 } };
         Plotly.react('plot-f1', [trace_upper1, trace_lower1, trace_true1, trace_mean1, trace_obs1, trace_next1], { ...layout_common, yaxis: {title: 'f₁ Value'} }, {displayModeBar: false});
 
         // [차트 2] Constraint Model
-        const trace_true2 = { x: X_test, y: Y2_true, mode: 'lines', line: { dash: 'dash', color: 'rgba(0,0,0,0.3)' } };
-        const trace_mean2 = { x: X_test, y: gp2.mean, mode: 'lines', line: { color: '#E64A19' } };
+        const trace_true2 = { x: X_test, y: Y2_true, mode: 'lines', line: { dash: 'dash', color: 'rgba(0,0,0,0.2)' } };
+        const trace_mean2 = { x: X_test, y: gp2.mean, mode: 'lines', line: { color: '#f97316' } };
         const trace_upper2 = { x: X_test, y: gp2.mean.map((m,i)=>m+2*gp2.std[i]), type: 'scatter', mode: 'lines', line: {width:0} };
-        const trace_lower2 = { x: X_test, y: gp2.mean.map((m,i)=>m-2*gp2.std[i]), type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(230, 74, 25, 0.2)', line: {width:0} };
-        const trace_obs2 = { x: X_train, y: Y2_train, mode: 'markers', marker: { color: marker_colors, size: 10, line: {color:'black', width:1} } };
+        const trace_lower2 = { x: X_test, y: gp2.mean.map((m,i)=>m-2*gp2.std[i]), type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(249, 115, 22, 0.1)', line: {width:0} };
+        const trace_obs2 = { x: X_train, y: Y2_train, mode: 'markers', marker: { color: marker_colors, size: 10, line: {color:'white', width:2} } };
         
         // Threshold Line (가장 중요)
-        const trace_threshold = { x: [0, 10], y: [threshold, threshold], mode: 'lines', line: { color: 'red', dash: 'dot', width: 2 } };
+        const trace_threshold = { x: [0, 10], y: [threshold, threshold], mode: 'lines', line: { color: '#ef4444', dash: 'dot', width: 2 } };
         Plotly.react('plot-f2', [trace_upper2, trace_lower2, trace_true2, trace_mean2, trace_obs2, trace_threshold], { ...layout_common, yaxis: {title: 'f₂ Value'} }, {displayModeBar: false});
 
         // [차트 3] Probability of Feasibility (PoF)
-        const trace_pof = { x: X_test, y: pof, mode: 'lines', fill: 'tozeroy', fillcolor: 'rgba(156, 39, 176, 0.2)', line: { color: '#9C27B0', width: 2 } };
+        const trace_pof = { x: X_test, y: pof, mode: 'lines', fill: 'tozeroy', fillcolor: 'rgba(139, 92, 246, 0.1)', line: { color: '#8b5cf6', width: 2 } };
         Plotly.react('plot-pof', [trace_pof], { ...layout_common, yaxis: {title: 'P(f₂ ≥ T)', range: [-0.05, 1.05]} }, {displayModeBar: false});
 
         // [차트 4] Constrained Acquisition
-        const trace_acq = { x: X_test, y: acq_constrained, mode: 'lines', fill: 'tozeroy', fillcolor: 'rgba(56, 142, 60, 0.2)', line: { color: '#388E3C', width: 2 } };
+        const trace_acq = { x: X_test, y: acq_constrained, mode: 'lines', fill: 'tozeroy', fillcolor: 'rgba(16, 185, 129, 0.1)', line: { color: '#10b981', width: 2 } };
         const trace_acq_next = { x: [next_x_candidate], y: [max_acq], mode: 'markers', marker: { symbol: 'star', color: 'red', size: 16 } };
         Plotly.react('plot-acq', [trace_acq, trace_acq_next], { ...layout_common, yaxis: {title: 'Acq × PoF'} }, {displayModeBar: false});
     }
@@ -219,8 +389,8 @@
     function sampleNextPoint() {
         if (next_x_candidate !== null) {
             X_train.push(next_x_candidate);
-            Y1_train.push(f1_true(next_x_candidate));
-            Y2_train.push(f2_true(next_x_candidate));
+            Y_train.push(f1_true(next_x_candidate));
+            Y_train.push(f2_true(next_x_candidate));
             updateCharts();
         }
     }
