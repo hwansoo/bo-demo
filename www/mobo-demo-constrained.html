@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Constrained Bayesian Optimization Demo</title>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f4f6f9; }
+        .dashboard { display: grid; grid-template-columns: 320px 1fr; gap: 20px; max-width: 1500px; margin: 0 auto; }
+        
+        /* 왼쪽 컨트롤 패널 */
+        .sidebar { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); height: fit-content; }
+        .sidebar h2 { margin-top: 0; color: #2c3e50; font-size: 20px; margin-bottom: 5px; }
+        .subtitle { color: #7f8c8d; font-size: 13px; margin-bottom: 20px; }
+        
+        .control-group { margin-bottom: 15px; }
+        .control-group label { display: block; font-weight: bold; margin-bottom: 8px; color: #34495e; }
+        
+        .constraint-box { background: #fff5e6; padding: 15px; border-radius: 8px; border: 1px solid #ffe0b2; margin-bottom: 20px; }
+        .constraint-box label { color: #e65100; margin-bottom: 10px; }
+        .constraint-box small { color: #e64a19; display: block; margin-top: 8px; line-height: 1.4; }
+        
+        select, input[type="range"] { width: 100%; padding: 8px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; font-size: 15px; font-weight: bold; color: white; background-color: #3498db; border: none; border-radius: 6px; cursor: pointer; transition: background 0.3s; margin-bottom: 10px; }
+        button:hover { background-color: #2980b9; }
+        .btn-restart { background-color: #95a5a6; }
+        .btn-restart:hover { background-color: #7f8c8d; }
+        
+        .legend-box { background: #f8f9fa; padding: 12px; border-radius: 8px; margin-top: 15px; border: 1px solid #ddd; font-size: 13px; line-height: 1.6; }
+        .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
+        .dot-green { background-color: #4CAF50; }
+        .dot-red { background-color: #F44336; }
+        
+        /* 오른쪽 차트 그리드 */
+        .chart-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 15px; }
+        .chart-container { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); padding: 10px; }
+        .chart-title { text-align: center; font-weight: bold; margin-bottom: 5px; color: #2c3e50; }
+        .plot { width: 100%; height: 320px; }
+    </style>
+</head>
+<body>
+
+<div class="dashboard">
+    <div class="sidebar">
+        <h2>Constrained BO</h2>
+        <div class="subtitle">Maximize Objective s.t. Constraint ≥ T</div>
+        
+        <div class="constraint-box">
+            <label for="thresholdSlider"><strong>제약 조건 임계값 (Threshold T):</strong> <span id="threshValue">2.0</span></label>
+            <input type="range" id="thresholdSlider" min="0" max="4.5" step="0.5" value="2.0" oninput="updateCharts()">
+            <small>f₂(x)가 이 값 이상이어야만 '유효한(Feasible)' 설계로 인정됩니다.</small>
+        </div>
+
+        <div class="control-group">
+            <label for="kappaSlider">탐색 파라미터 (κ): <span id="kappaValue">2.0</span></label>
+            <input type="range" id="kappaSlider" min="0" max="5" step="0.1" value="2.0" oninput="updateCharts()">
+        </div>
+
+        <button id="nextBtn" onclick="sampleNextPoint()">선정된 다음 관측점 추가</button>
+        <button class="btn-restart" onclick="restart()">새로 시작 (Restart)</button>
+
+        <div class="legend-box">
+            <strong>관측점 상태 표시:</strong><br>
+            <span class="dot dot-green"></span>조건 만족 (Feasible: f₂ ≥ T)<br>
+            <span class="dot dot-red"></span>조건 위반 (Infeasible: f₂ < T)
+        </div>
+    </div>
+
+    <div class="chart-grid">
+        <div class="chart-container">
+            <div class="chart-title" style="color:#1976D2;">1. GP Model: Objective f₁(x)</div>
+            <div id="plot-f1" class="plot"></div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title" style="color:#E64A19;">2. GP Model: Constraint f₂(x)</div>
+            <div id="plot-f2" class="plot"></div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title" style="color:#9C27B0;">3. Probability of Feasibility (PoF)</div>
+            <div id="plot-pof" class="plot"></div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title" style="color:#388E3C;">4. Constrained Acquisition (Acq × PoF)</div>
+            <div id="plot-acq" class="plot"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 1. 초기 설정 및 실제 함수
+    const X_test = Array.from({length: 100}, (_, i) => i * 10 / 99);
+    
+    // f1 (Objective): x가 클수록 전반적으로 증가하지만 굴곡이 있음. 최댓값은 오른쪽 끝.
+    const f1_true = (x) => 2 * Math.sin(x) + x / 1.5 + 4;
+    // f2 (Constraint): 가운데 구역(x ≒ 5)만 값이 높고, 양 끝은 값이 낮음.
+    const f2_true = (x) => 4.5 - Math.pow(x - 5, 2) / 2.5;
+
+    const Y1_true = X_test.map(f1_true);
+    const Y2_true = X_test.map(f2_true);
+
+    let X_train = [];
+    let Y1_train = [];
+    let Y2_train = [];
+    let next_x_candidate = null;
+
+    // GP 연산 공용 함수
+    function computeGP(x_train, y_train, x_test) {
+        const l = 1.2; const sigma_f = 2.0; const sigma_n = 0.05;
+        const N = x_train.length; const M = x_test.length;
+        const kernel = (x1, x2) => Math.pow(sigma_f, 2) * Math.exp(-0.5 * Math.pow(x1 - x2, 2) / Math.pow(l, 2));
+
+        if (N === 0) return { mean: Array(M).fill(0), std: Array(M).fill(sigma_f) };
+
+        let K = [];
+        for (let i = 0; i < N; i++) {
+            K[i] = [];
+            for (let j = 0; j < N; j++) K[i][j] = kernel(x_train[i], x_train[j]) + (i === j ? Math.pow(sigma_n, 2) : 0);
+        }
+
+        const K_mat = math.matrix(K);
+        const K_inv = math.inv(K_mat);
+        let Y_train_mat = math.matrix(y_train.map(y => [y]));
+        let alpha = math.multiply(K_inv, Y_train_mat);
+
+        let mean = [], std = [];
+        for (let i = 0; i < M; i++) {
+            let k_star = [];
+            for (let j = 0; j < N; j++) k_star.push(kernel(x_test[i], x_train[j]));
+            let k_star_mat = math.matrix([k_star]);
+            mean.push(math.multiply(k_star_mat, alpha).get([0, 0]));
+            let v = kernel(x_test[i], x_test[i]) - math.multiply(math.multiply(k_star_mat, K_inv), math.transpose(k_star_mat)).get([0, 0]);
+            std.push(Math.sqrt(Math.max(v, 0)));
+        }
+        return { mean, std };
+    }
+
+    const normalCDF = (x) => 0.5 * (1 + math.erf(x / Math.sqrt(2)));
+
+    function restart() {
+        X_train = []; Y1_train = []; Y2_train = [];
+        // 초기 관측점: 1개는 제약조건 만족(가운데), 1개는 불만족(왼쪽 끝)
+        [1.5, 5.5].forEach(x => {
+            X_train.push(x);
+            Y1_train.push(f1_true(x));
+            Y2_train.push(f2_true(x));
+        });
+        updateCharts();
+    }
+
+    function updateCharts() {
+        const threshold = parseFloat(document.getElementById('thresholdSlider').value);
+        const kappa = parseFloat(document.getElementById('kappaSlider').value);
+        document.getElementById('threshValue').innerText = threshold.toFixed(1);
+        document.getElementById('kappaValue').innerText = kappa.toFixed(1);
+
+        const gp1 = computeGP(X_train, Y1_train, X_test);
+        const gp2 = computeGP(X_train, Y2_train, X_test);
+
+        let pof = []; // Probability of Feasibility
+        let acq_base = []; // Unconstrained UCB
+        let acq_constrained = []; // Final Acquisition
+
+        for (let i = 0; i < X_test.length; i++) {
+            // 1. PoF 계산: P(f2 >= Threshold)
+            let z = (gp2.mean[i] - threshold) / (gp2.std[i] + 1e-9);
+            let prob = normalCDF(z);
+            pof.push(prob);
+
+            // 2. Base Acquisition (UCB of f1)
+            let ucb = gp1.mean[i] + kappa * gp1.std[i];
+            acq_base.push(ucb);
+
+            // 3. Constrained Acquisition
+            acq_constrained.push(ucb * prob);
+        }
+
+        const max_acq = Math.max(...acq_constrained);
+        const max_index = acq_constrained.indexOf(max_acq);
+        next_x_candidate = X_test[max_index];
+
+        // 관측점의 성공/실패 색상 분류
+        let color_feasible = '#4CAF50'; // Green
+        let color_infeasible = '#F44336'; // Red
+        let marker_colors = Y2_train.map(y2 => y2 >= threshold ? color_feasible : color_infeasible);
+
+        const layout_common = { margin: {l: 40, r: 20, b: 30, t: 10}, xaxis: {title: 'Input X'}, showlegend: false };
+
+        // [차트 1] Objective Model
+        const trace_true1 = { x: X_test, y: Y1_true, mode: 'lines', line: { dash: 'dash', color: 'rgba(0,0,0,0.3)' } };
+        const trace_mean1 = { x: X_test, y: gp1.mean, mode: 'lines', line: { color: '#1976D2' } };
+        const trace_upper1 = { x: X_test, y: gp1.mean.map((m,i)=>m+2*gp1.std[i]), type: 'scatter', mode: 'lines', line: {width:0} };
+        const trace_lower1 = { x: X_test, y: gp1.mean.map((m,i)=>m-2*gp1.std[i]), type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(25, 118, 210, 0.2)', line: {width:0} };
+        const trace_obs1 = { x: X_train, y: Y1_train, mode: 'markers', marker: { color: marker_colors, size: 10, line: {color:'black', width:1} } };
+        const trace_next1 = { x: [next_x_candidate], y: [gp1.mean[max_index]], mode: 'markers', marker: { symbol: 'star', color: 'blue', size: 14 } };
+        Plotly.react('plot-f1', [trace_upper1, trace_lower1, trace_true1, trace_mean1, trace_obs1, trace_next1], { ...layout_common, yaxis: {title: 'f₁ Value'} }, {displayModeBar: false});
+
+        // [차트 2] Constraint Model
+        const trace_true2 = { x: X_test, y: Y2_true, mode: 'lines', line: { dash: 'dash', color: 'rgba(0,0,0,0.3)' } };
+        const trace_mean2 = { x: X_test, y: gp2.mean, mode: 'lines', line: { color: '#E64A19' } };
+        const trace_upper2 = { x: X_test, y: gp2.mean.map((m,i)=>m+2*gp2.std[i]), type: 'scatter', mode: 'lines', line: {width:0} };
+        const trace_lower2 = { x: X_test, y: gp2.mean.map((m,i)=>m-2*gp2.std[i]), type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(230, 74, 25, 0.2)', line: {width:0} };
+        const trace_obs2 = { x: X_train, y: Y2_train, mode: 'markers', marker: { color: marker_colors, size: 10, line: {color:'black', width:1} } };
+        
+        // Threshold Line (가장 중요)
+        const trace_threshold = { x: [0, 10], y: [threshold, threshold], mode: 'lines', line: { color: 'red', dash: 'dot', width: 2 } };
+        Plotly.react('plot-f2', [trace_upper2, trace_lower2, trace_true2, trace_mean2, trace_obs2, trace_threshold], { ...layout_common, yaxis: {title: 'f₂ Value'} }, {displayModeBar: false});
+
+        // [차트 3] Probability of Feasibility (PoF)
+        const trace_pof = { x: X_test, y: pof, mode: 'lines', fill: 'tozeroy', fillcolor: 'rgba(156, 39, 176, 0.2)', line: { color: '#9C27B0', width: 2 } };
+        Plotly.react('plot-pof', [trace_pof], { ...layout_common, yaxis: {title: 'P(f₂ ≥ T)', range: [-0.05, 1.05]} }, {displayModeBar: false});
+
+        // [차트 4] Constrained Acquisition
+        const trace_acq = { x: X_test, y: acq_constrained, mode: 'lines', fill: 'tozeroy', fillcolor: 'rgba(56, 142, 60, 0.2)', line: { color: '#388E3C', width: 2 } };
+        const trace_acq_next = { x: [next_x_candidate], y: [max_acq], mode: 'markers', marker: { symbol: 'star', color: 'red', size: 16 } };
+        Plotly.react('plot-acq', [trace_acq, trace_acq_next], { ...layout_common, yaxis: {title: 'Acq × PoF'} }, {displayModeBar: false});
+    }
+
+    function sampleNextPoint() {
+        if (next_x_candidate !== null) {
+            X_train.push(next_x_candidate);
+            Y1_train.push(f1_true(next_x_candidate));
+            Y2_train.push(f2_true(next_x_candidate));
+            updateCharts();
+        }
+    }
+
+    restart();
+</script>
+
+</body>
+</html>

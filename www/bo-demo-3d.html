@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Bayesian Optimization Demo</title>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f0f2f5; }
+        .dashboard { display: grid; grid-template-columns: 320px 1fr; gap: 20px; max-width: 1500px; margin: 0 auto; }
+        
+        /* 왼쪽 컨트롤 패널 */
+        .sidebar { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); height: fit-content; }
+        .sidebar h2 { margin-top: 0; color: #333; font-size: 20px; margin-bottom: 5px; }
+        .subtitle { color: #666; font-size: 13px; margin-bottom: 20px; }
+        
+        .control-group { margin-bottom: 15px; }
+        .control-group label { display: block; font-weight: bold; margin-bottom: 8px; color: #555; }
+        
+        .z-slider-box { background: #e3f2fd; padding: 15px; border-radius: 8px; border: 1px solid #90caf9; margin-bottom: 20px; }
+        .z-slider-box label { color: #0d47a1; margin-bottom: 10px; }
+        .z-slider-box small { color: #1565c0; display: block; margin-top: 8px; line-height: 1.4; }
+        
+        select, input[type="range"] { width: 100%; padding: 8px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; font-size: 15px; font-weight: bold; color: white; background-color: #4CAF50; border: none; border-radius: 6px; cursor: pointer; transition: background 0.3s; margin-bottom: 10px; }
+        button:hover { background-color: #45a049; }
+        .btn-restart { background-color: #f44336; }
+        .btn-restart:hover { background-color: #da190b; }
+        
+        .stats { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px; border: 1px solid #ddd; }
+        
+        /* 오른쪽 차트 그리드 */
+        .chart-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 15px; }
+        .chart-container { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 10px; }
+        .chart-title { text-align: center; font-weight: bold; margin-bottom: 5px; color: #333; }
+        .plot { width: 100%; height: 350px; }
+    </style>
+</head>
+<body>
+
+<div class="dashboard">
+    <div class="sidebar">
+        <h2>3D BO Controls</h2>
+        <div class="subtitle">단면(Cross-Section) 슬라이더 방식</div>
+        
+        <div class="z-slider-box">
+            <label for="zSlider"><strong>단면 Z축 위치 (Depth):</strong> <span id="zLabel">5.0</span></label>
+            <input type="range" id="zSlider" min="0" max="10" step="0.2" value="5.0" oninput="renderSlice()">
+            <small>슬라이더를 움직여 3차원 지형을 위아래로 훑어보세요.<br>💡 다음 관측점이 추천되면 해당 Z축으로 <strong>자동 이동</strong>합니다.</small>
+        </div>
+
+        <div class="control-group">
+            <label for="afSelect">Acquisition Function:</label>
+            <select id="afSelect" onchange="runOptimizationStep()">
+                <option value="UCB">UCB (Upper Conf. Bound)</option>
+                <option value="EI">EI (Expected Improvement)</option>
+                <option value="PI">PI (Prob. of Improvement)</option>
+            </select>
+        </div>
+        
+        <div class="control-group">
+            <label for="kappaSlider"><span id="paramLabel">Exploration Param (κ):</span> <span id="paramValue">2.0</span></label>
+            <input type="range" id="kappaSlider" min="0" max="5" step="0.1" value="2.0" oninput="runOptimizationStep()">
+        </div>
+
+        <button id="nextBtn" onclick="sampleNextPoint()">선정된 다음 관측점 추가</button>
+        <button class="btn-restart" onclick="restart()">새로 시작 (Restart)</button>
+
+        <div class="stats">
+            <p><strong>관측 횟수:</strong> <span id="statCount">0</span></p>
+            <p><strong>발견된 최적값 (Value):</strong> <span id="statBest">0.000</span></p>
+        </div>
+    </div>
+
+    <div class="chart-grid">
+        <div class="chart-container">
+            <div class="chart-title">Target Function Slice (Unknown)</div>
+            <div id="plot-true" class="plot"></div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title">Surrogate Mean Slice</div>
+            <div id="plot-mean" class="plot"></div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title">Surrogate Variance Slice</div>
+            <div id="plot-var" class="plot"></div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title">Acquisition Function Slice</div>
+            <div id="plot-acq" class="plot"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 1. 초기 설정 (공간 해상도)
+    const sliceRes = 30; // 2D 단면 해상도
+    const searchRes = 15; // 3D 전체 탐색 해상도 (브라우저 부하 방지용)
+    const x_slice = Array.from({length: sliceRes}, (_, i) => i * 10 / (sliceRes - 1));
+    const y_slice = Array.from({length: sliceRes}, (_, i) => i * 10 / (sliceRes - 1));
+    const search_grid = Array.from({length: searchRes}, (_, i) => i * 10 / (searchRes - 1));
+
+    let true_function;
+    let X_train = []; 
+    let Y_train = []; 
+    let next_candidate = null; 
+    let y_best = 0;
+
+    let K_inv_arr = [];
+    let alpha_arr = [];
+
+    // 3D 가우시안 덩어리를 생성하는 무작위 함수
+    function generateRandomTrueFunction3D() {
+        const cx1 = 2 + Math.random() * 6, cy1 = 2 + Math.random() * 6, cz1 = 2 + Math.random() * 6;
+        const cx2 = 2 + Math.random() * 6, cy2 = 2 + Math.random() * 6, cz2 = 2 + Math.random() * 6;
+        return (x, y, z) => {
+            const d1 = (x-cx1)**2 + (y-cy1)**2 + (z-cz1)**2;
+            const p1 = Math.exp(-d1 / 6);
+            const d2 = (x-cx2)**2 + (y-cy2)**2 + (z-cz2)**2;
+            const p2 = 0.8 * Math.exp(-d2 / 5);
+            const wave = 0.15 * Math.sin(1.5*x) * Math.cos(1.5*y) * Math.sin(1.5*z);
+            return p1 + p2 + wave;
+        };
+    }
+
+    const normalPDF = (x) => Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
+    const normalCDF = (x) => 0.5 * (1 + math.erf(x / Math.sqrt(2)));
+
+    const l = 2.0; const sigma_f = 1.0; const sigma_n = 0.01;
+    const kernel = (p1, p2) => {
+        const dSq = (p1[0]-p2[0])**2 + (p1[1]-p2[1])**2 + (p1[2]-p2[2])**2;
+        return sigma_f**2 * Math.exp(-0.5 * dSq / l**2);
+    };
+
+    function restart() {
+        true_function = generateRandomTrueFunction3D();
+        X_train = [];
+        Y_train = [];
+        
+        for(let k=0; k<4; k++) {
+            const rx = Math.random() * 10, ry = Math.random() * 10, rz = Math.random() * 10;
+            X_train.push([rx, ry, rz]);
+            Y_train.push(true_function(rx, ry, rz));
+        }
+        runOptimizationStep();
+    }
+
+    // GP 모델 학습 (버그 수정됨: math.matrix로 타입 명시)
+    function trainGP() {
+        const N = X_train.length;
+        let K = [];
+        for (let i = 0; i < N; i++) {
+            K[i] = [];
+            for (let j = 0; j < N; j++) {
+                K[i][j] = kernel(X_train[i], X_train[j]) + (i === j ? sigma_n**2 : 0);
+            }
+        }
+        
+        // 명시적으로 Matrix 객체로 생성 후 역행렬 계산
+        const K_mat = math.matrix(K);
+        const K_inv_mat = math.inv(K_mat);
+        let Y_train_mat = math.matrix(Y_train.map(y => [y]));
+        
+        K_inv_arr = K_inv_mat.toArray();
+        alpha_arr = math.multiply(K_inv_mat, Y_train_mat).toArray().map(row => row[0]);
+        y_best = Math.max(...Y_train);
+    }
+
+    // 임의의 3D 포인트에 대한 평균 및 분산 예측
+    function predictPoint(pt) {
+        const N = X_train.length;
+        let k_star = new Array(N);
+        for(let n=0; n<N; n++) k_star[n] = kernel(pt, X_train[n]);
+        
+        let mu = 0;
+        for(let n=0; n<N; n++) mu += k_star[n] * alpha_arr[n];
+        
+        let v_sub = 0;
+        for(let r=0; r<N; r++) {
+            let rowSum = 0;
+            for(let c=0; c<N; c++) rowSum += K_inv_arr[r][c] * k_star[c];
+            v_sub += k_star[r] * rowSum;
+        }
+        let v = kernel(pt, pt) - v_sub;
+        return { mean: mu, std: Math.sqrt(Math.max(v, 0)) };
+    }
+
+    function calcAcq(m, s, afType, paramValue) {
+        if (afType === 'UCB') return m + paramValue * s;
+        if (s < 1e-9) return 0;
+        const Z = (m - y_best - paramValue) / s;
+        if (afType === 'PI') return normalCDF(Z);
+        if (afType === 'EI') return (m - y_best - paramValue) * normalCDF(Z) + s * normalPDF(Z);
+        return 0;
+    }
+
+    // 최적화 스텝 진행 (다음 후보 탐색)
+    function runOptimizationStep() {
+        trainGP();
+        
+        const afType = document.getElementById('afSelect').value;
+        const paramValue = parseFloat(document.getElementById('kappaSlider').value);
+        document.getElementById('paramValue').innerText = paramValue.toFixed(2);
+        document.getElementById('paramLabel').innerText = afType === 'UCB' ? '탐색 파라미터 (κ):' : '탐색 파라미터 (ξ):';
+        
+        document.getElementById('statCount').innerText = X_train.length;
+        document.getElementById('statBest').innerText = y_best.toFixed(4);
+
+        let max_acq = -Infinity;
+        let best_pt = [0, 0, 0];
+
+        // 3D 스캔
+        for (let x of search_grid) {
+            for (let y of search_grid) {
+                for (let z of search_grid) {
+                    let { mean, std } = predictPoint([x, y, z]);
+                    let acq = calcAcq(mean, std, afType, paramValue);
+                    if (acq > max_acq) { max_acq = acq; best_pt = [x, y, z]; }
+                }
+            }
+        }
+        next_candidate = best_pt;
+
+        document.getElementById('zSlider').value = next_candidate[2].toFixed(1);
+        renderSlice(); 
+    }
+
+    // 2D 단면 렌더링
+    function renderSlice() {
+        const current_z = parseFloat(document.getElementById('zSlider').value);
+        document.getElementById('zLabel').innerText = current_z.toFixed(1);
+        
+        const afType = document.getElementById('afSelect').value;
+        const paramValue = parseFloat(document.getElementById('kappaSlider').value);
+
+        let z_true_grid = [], mean_grid = [], std_grid = [], acq_grid = [];
+
+        for (let j = 0; j < sliceRes; j++) {
+            let tr_row = [], m_row = [], s_row = [], a_row = [];
+            const y_val = y_slice[j];
+            for (let i = 0; i < sliceRes; i++) {
+                const x_val = x_slice[i];
+                tr_row.push(true_function(x_val, y_val, current_z));
+                
+                let { mean, std } = predictPoint([x_val, y_val, current_z]);
+                m_row.push(mean);
+                s_row.push(std);
+                a_row.push(calcAcq(mean, std, afType, paramValue));
+            }
+            z_true_grid.push(tr_row); mean_grid.push(m_row); std_grid.push(s_row); acq_grid.push(a_row);
+        }
+
+        const commonLayout = { margin: {l: 30, r: 10, b: 30, t: 10}, xaxis: {range: [0, 10]}, yaxis: {range: [0, 10]}, showlegend: false };
+        const contourSet = { coloring: 'heatmap', showlines: false };
+        const lineSet = { width: 0 };
+
+        let obs_x = [], obs_y = [], obs_opacity = [], obs_size = [];
+        for(let pt of X_train) {
+            let dist = Math.abs(pt[2] - current_z);
+            if(dist < 2.0) { 
+                obs_x.push(pt[0]); obs_y.push(pt[1]);
+                obs_opacity.push(Math.max(0.1, 1 - dist / 1.5)); 
+                obs_size.push(Math.max(4, 12 - dist * 4));       
+            }
+        }
+
+        const obs_trace = { 
+            x: obs_x, y: obs_y, mode: 'markers', 
+            marker: { color: 'white', size: obs_size, opacity: obs_opacity, line: { color: 'black', width: 2 } }, type: 'scatter' 
+        };
+
+        let cand_dist = Math.abs(next_candidate[2] - current_z);
+        let cand_opacity = cand_dist < 1.0 ? 1 : (cand_dist < 2.5 ? 0.3 : 0);
+        
+        const next_trace = { 
+            x: [next_candidate[0]], y: [next_candidate[1]], mode: 'markers', 
+            marker: { color: 'red', size: 16, symbol: 'star', opacity: cand_opacity, line: { color: 'white', width: 1 } }, type: 'scatter' 
+        };
+
+        Plotly.react('plot-true', [ { z: z_true_grid, x: x_slice, y: y_slice, type: 'contour', colorscale: 'Viridis', contours: contourSet, line: lineSet }, obs_trace ], commonLayout, {displayModeBar: false});
+        Plotly.react('plot-mean', [ { z: mean_grid, x: x_slice, y: y_slice, type: 'contour', colorscale: 'Viridis', contours: contourSet, line: lineSet }, obs_trace, next_trace ], commonLayout, {displayModeBar: false});
+        Plotly.react('plot-var', [ { z: std_grid, x: x_slice, y: y_slice, type: 'contour', colorscale: 'Cividis', contours: contourSet, line: lineSet }, obs_trace ], commonLayout, {displayModeBar: false});
+        Plotly.react('plot-acq', [ { z: acq_grid, x: x_slice, y: y_slice, type: 'contour', colorscale: 'YlGnBu', contours: contourSet, line: lineSet }, next_trace ], commonLayout, {displayModeBar: false});
+    }
+
+    function sampleNextPoint() {
+        if (next_candidate) {
+            X_train.push([...next_candidate]); 
+            Y_train.push(true_function(...next_candidate));
+            runOptimizationStep();
+        }
+    }
+
+    // 최초 렌더링 실행
+    restart();
+</script>
+
+</body>
+</html>

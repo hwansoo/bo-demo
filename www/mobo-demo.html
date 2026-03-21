@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Multi-Objective Bayesian Optimization Demo</title>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f0f2f5; }
+        .dashboard { display: grid; grid-template-columns: 320px 1fr; gap: 20px; max-width: 1500px; margin: 0 auto; }
+        
+        /* 왼쪽 컨트롤 패널 */
+        .sidebar { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); height: fit-content; }
+        .sidebar h2 { margin-top: 0; color: #333; font-size: 20px; margin-bottom: 5px; }
+        .subtitle { color: #666; font-size: 13px; margin-bottom: 20px; }
+        
+        .control-group { margin-bottom: 15px; }
+        .control-group label { display: block; font-weight: bold; margin-bottom: 8px; color: #555; }
+        
+        .weight-box { background: #e8f5e9; padding: 15px; border-radius: 8px; border: 1px solid #a5d6a7; margin-bottom: 20px; }
+        .weight-box label { color: #2e7d32; margin-bottom: 10px; }
+        .weight-box small { color: #388e3c; display: block; margin-top: 8px; line-height: 1.4; }
+        
+        select, input[type="range"] { width: 100%; padding: 8px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; font-size: 15px; font-weight: bold; color: white; background-color: #4CAF50; border: none; border-radius: 6px; cursor: pointer; transition: background 0.3s; margin-bottom: 10px; }
+        button:hover { background-color: #45a049; }
+        .btn-restart { background-color: #f44336; }
+        .btn-restart:hover { background-color: #da190b; }
+        
+        .stats { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px; border: 1px solid #ddd; font-size: 14px; }
+        .stats span { font-weight: bold; color: #d32f2f; }
+        
+        /* 오른쪽 차트 그리드 (2x2) */
+        .chart-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 15px; }
+        .chart-container { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 10px; }
+        .chart-title { text-align: center; font-weight: bold; margin-bottom: 5px; color: #333; }
+        .plot { width: 100%; height: 320px; }
+    </style>
+</head>
+<body>
+
+<div class="dashboard">
+    <div class="sidebar">
+        <h2>Multi-Objective BO</h2>
+        <div class="subtitle">Pareto Front & Scalarization</div>
+        
+        <div class="weight-box">
+            <label for="weightSlider"><strong>목표 가중치 (Trade-off):</strong></label>
+            <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: bold; margin-bottom: 5px;">
+                <span style="color: #1976D2;">← f1 집중</span>
+                <span style="color: #E64A19;">f2 집중 →</span>
+            </div>
+            <input type="range" id="weightSlider" min="0" max="1" step="0.05" value="0.5" oninput="updateCharts()">
+            <small>슬라이더를 움직여 두 목표 사이의 타협점을 변경하세요. 획득 함수가 선호하는 방향으로 바뀝니다.</small>
+        </div>
+
+        <div class="control-group">
+            <label for="kappaSlider">탐색 파라미터 (κ): <span id="kappaValue">2.0</span></label>
+            <input type="range" id="kappaSlider" min="0" max="5" step="0.1" value="2.0" oninput="updateCharts()">
+        </div>
+
+        <button id="nextBtn" onclick="sampleNextPoint()">선정된 다음 관측점 추가</button>
+        <button class="btn-restart" onclick="restart()">새로 시작 (Restart)</button>
+
+        <div class="stats">
+            <p>관측 횟수: <span id="statCount">0</span></p>
+            <p>파레토 최적해 개수: <span id="statPareto">0</span></p>
+        </div>
+    </div>
+
+    <div class="chart-grid">
+        <div class="chart-container">
+            <div class="chart-title">GP Model 1: f₁(x) (Max)</div>
+            <div id="plot-f1" class="plot"></div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title" style="color: #D32F2F;">Objective Space (Pareto Front)</div>
+            <div id="plot-pareto" class="plot"></div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title">GP Model 2: f₂(x) (Max)</div>
+            <div id="plot-f2" class="plot"></div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title">Scalarized Acquisition Function</div>
+            <div id="plot-acq" class="plot"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 1. 초기 설정 및 실제 함수 2개 정의 (서로 상충하는 형태)
+    const X_test = Array.from({length: 100}, (_, i) => i * 10 / 99);
+    
+    // f1: x가 작을 때 유리한 함수
+    const f1_true = (x) => 3 * Math.exp(-Math.pow(x - 2, 2) / 5) + Math.sin(1.5 * x) + 2;
+    // f2: x가 클 때 유리한 함수
+    const f2_true = (x) => 3 * Math.exp(-Math.pow(x - 8, 2) / 5) + Math.cos(1.5 * x) + 2;
+
+    const Y1_true = X_test.map(f1_true);
+    const Y2_true = X_test.map(f2_true);
+
+    // True Pareto Front 사전 계산
+    function calculateParetoFront(y1_arr, y2_arr) {
+        let points = y1_arr.map((y1, i) => ({ y1: y1, y2: y2_arr[i], idx: i }));
+        // y1 기준 내림차순, 같으면 y2 기준 내림차순 정렬
+        points.sort((a, b) => b.y1 - a.y1 || b.y2 - a.y2);
+        
+        let pareto = [];
+        let maxY2 = -Infinity;
+        for (let p of points) {
+            if (p.y2 > maxY2) {
+                pareto.push(p);
+                maxY2 = p.y2;
+            }
+        }
+        return pareto;
+    }
+    const true_pareto = calculateParetoFront(Y1_true, Y2_true);
+
+    let X_train = [];
+    let Y1_train = [];
+    let Y2_train = [];
+    let next_x_candidate = null;
+    let next_pred_f1 = { mean: 0, std: 0 };
+    let next_pred_f2 = { mean: 0, std: 0 };
+
+    // 가우시안 프로세스 공용 함수
+    function computeGP(x_train, y_train, x_test) {
+        const l = 1.0; const sigma_f = 1.5; const sigma_n = 0.05;
+        const N = x_train.length; const M = x_test.length;
+        const kernel = (x1, x2) => Math.pow(sigma_f, 2) * Math.exp(-0.5 * Math.pow(x1 - x2, 2) / Math.pow(l, 2));
+
+        if (N === 0) return { mean: Array(M).fill(0), std: Array(M).fill(sigma_f) };
+
+        let K = [];
+        for (let i = 0; i < N; i++) {
+            K[i] = [];
+            for (let j = 0; j < N; j++) K[i][j] = kernel(x_train[i], x_train[j]) + (i === j ? Math.pow(sigma_n, 2) : 0);
+        }
+
+        const K_mat = math.matrix(K);
+        const K_inv = math.inv(K_mat);
+        let Y_train_mat = math.matrix(y_train.map(y => [y]));
+        let alpha = math.multiply(K_inv, Y_train_mat);
+
+        let mean = [], std = [];
+        for (let i = 0; i < M; i++) {
+            let k_star = [];
+            for (let j = 0; j < N; j++) k_star.push(kernel(x_test[i], x_train[j]));
+            
+            let k_star_mat = math.matrix([k_star]);
+            mean.push(math.multiply(k_star_mat, alpha).get([0, 0]));
+
+            let v = kernel(x_test[i], x_test[i]) - math.multiply(math.multiply(k_star_mat, K_inv), math.transpose(k_star_mat)).get([0, 0]);
+            std.push(Math.sqrt(Math.max(v, 0)));
+        }
+        return { mean, std };
+    }
+
+    function restart() {
+        X_train = []; Y1_train = []; Y2_train = [];
+        // 초기 관측점 3개
+        [1, 5, 9].forEach(x => {
+            X_train.push(x);
+            Y1_train.push(f1_true(x));
+            Y2_train.push(f2_true(x));
+        });
+        updateCharts();
+    }
+
+    // 차트 및 로직 업데이트
+    function updateCharts() {
+        // 1. 각 목표에 대한 GP 모델 계산
+        const gp1 = computeGP(X_train, Y1_train, X_test);
+        const gp2 = computeGP(X_train, Y2_train, X_test);
+
+        const kappa = parseFloat(document.getElementById('kappaSlider').value);
+        const weight_f2 = parseFloat(document.getElementById('weightSlider').value); // 0이면 f1 올인, 1이면 f2 올인
+        const weight_f1 = 1.0 - weight_f2;
+        document.getElementById('kappaValue').innerText = kappa.toFixed(1);
+
+        // 2. Acquisition Function (Linear Scalarization of UCB)
+        let acq = [];
+        for (let i = 0; i < X_test.length; i++) {
+            let ucb1 = gp1.mean[i] + kappa * gp1.std[i];
+            let ucb2 = gp2.mean[i] + kappa * gp2.std[i];
+            // 두 목표를 가중합하여 단일 획득 함수로 변환
+            acq.push(weight_f1 * ucb1 + weight_f2 * ucb2);
+        }
+
+        // 다음 관측점 선정
+        const max_acq = Math.max(...acq);
+        const max_index = acq.indexOf(max_acq);
+        next_x_candidate = X_test[max_index];
+        next_pred_f1 = { mean: gp1.mean[max_index], std: gp1.std[max_index] };
+        next_pred_f2 = { mean: gp2.mean[max_index], std: gp2.std[max_index] };
+
+        // 관측된 파레토 프론트 계산
+        const current_pareto = calculateParetoFront(Y1_train, Y2_train);
+        document.getElementById('statCount').innerText = X_train.length;
+        document.getElementById('statPareto').innerText = current_pareto.length;
+
+        // --- Plotly 차트 데이터 구성 ---
+        const layout_common = { margin: {l: 40, r: 20, b: 30, t: 10}, xaxis: {title: 'Input X'}, showlegend: false };
+
+        // [차트 1] GP Model 1 (f1)
+        const trace_true1 = { x: X_test, y: Y1_true, mode: 'lines', line: { dash: 'dash', color: 'rgba(0,0,0,0.3)' } };
+        const trace_mean1 = { x: X_test, y: gp1.mean, mode: 'lines', line: { color: '#1976D2' } };
+        const trace_upper1 = { x: X_test, y: gp1.mean.map((m,i)=>m+2*gp1.std[i]), type: 'scatter', mode: 'lines', line: {width:0} };
+        const trace_lower1 = { x: X_test, y: gp1.mean.map((m,i)=>m-2*gp1.std[i]), type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(25, 118, 210, 0.2)', line: {width:0} };
+        const trace_obs1 = { x: X_train, y: Y1_train, mode: 'markers', marker: { color: 'black', size: 8 } };
+        const trace_next1 = { x: [next_x_candidate], y: [next_pred_f1.mean], mode: 'markers', marker: { symbol: 'star', color: 'red', size: 14 } };
+        Plotly.react('plot-f1', [trace_upper1, trace_lower1, trace_true1, trace_mean1, trace_obs1, trace_next1], { ...layout_common, yaxis: {title: 'f₁ Value'} }, {displayModeBar: false});
+
+        // [차트 2] GP Model 2 (f2)
+        const trace_true2 = { x: X_test, y: Y2_true, mode: 'lines', line: { dash: 'dash', color: 'rgba(0,0,0,0.3)' } };
+        const trace_mean2 = { x: X_test, y: gp2.mean, mode: 'lines', line: { color: '#E64A19' } };
+        const trace_upper2 = { x: X_test, y: gp2.mean.map((m,i)=>m+2*gp2.std[i]), type: 'scatter', mode: 'lines', line: {width:0} };
+        const trace_lower2 = { x: X_test, y: gp2.mean.map((m,i)=>m-2*gp2.std[i]), type: 'scatter', mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(230, 74, 25, 0.2)', line: {width:0} };
+        const trace_obs2 = { x: X_train, y: Y2_train, mode: 'markers', marker: { color: 'black', size: 8 } };
+        const trace_next2 = { x: [next_x_candidate], y: [next_pred_f2.mean], mode: 'markers', marker: { symbol: 'star', color: 'red', size: 14 } };
+        Plotly.react('plot-f2', [trace_upper2, trace_lower2, trace_true2, trace_mean2, trace_obs2, trace_next2], { ...layout_common, yaxis: {title: 'f₂ Value'} }, {displayModeBar: false});
+
+        // [차트 3] Acquisition Function (가중합)
+        const trace_acq = { x: X_test, y: acq, mode: 'lines', fill: 'tozeroy', fillcolor: 'rgba(76, 175, 80, 0.2)', line: { color: '#4CAF50' } };
+        const trace_acq_next = { x: [next_x_candidate], y: [max_acq], mode: 'markers', marker: { symbol: 'star', color: 'red', size: 14 } };
+        Plotly.react('plot-acq', [trace_acq, trace_acq_next], { ...layout_common, yaxis: {title: 'Acq Value'} }, {displayModeBar: false});
+
+        // [차트 4] Objective Space (MOBO의 핵심: 파레토 프론트)
+        const trace_true_pareto = { 
+            x: true_pareto.map(p => p.y1), y: true_pareto.map(p => p.y2), 
+            mode: 'lines', line: { color: 'rgba(0,0,0,0.15)', width: 4 }, name: 'True Pareto' 
+        };
+        const trace_obj_obs = { 
+            x: Y1_train, y: Y2_train, 
+            mode: 'markers', marker: { color: 'black', size: 8 }, name: 'Observed' 
+        };
+        const trace_obj_pareto = { 
+            x: current_pareto.map(p => p.y1), y: current_pareto.map(p => p.y2), 
+            mode: 'lines+markers', line: { color: '#9C27B0', width: 2 }, marker: { color: '#9C27B0', size: 10 }, name: 'Current Pareto' 
+        };
+        // 예측되는 다음 위치 (불확실성 에러바 포함)
+        const trace_obj_next = { 
+            x: [next_pred_f1.mean], y: [next_pred_f2.mean], 
+            error_x: { type: 'data', array: [2 * next_pred_f1.std], visible: true, color: 'rgba(255,0,0,0.4)' },
+            error_y: { type: 'data', array: [2 * next_pred_f2.std], visible: true, color: 'rgba(255,0,0,0.4)' },
+            mode: 'markers', marker: { symbol: 'star', color: 'red', size: 16 }, name: 'Predicted Next' 
+        };
+
+        const layout_obj = { 
+            margin: {l: 50, r: 20, b: 40, t: 10}, 
+            xaxis: {title: 'f₁ (Maximize)', range: [-1, 6]}, 
+            yaxis: {title: 'f₂ (Maximize)', range: [-1, 6]}, 
+            showlegend: false, hovermode: 'closest'
+        };
+        Plotly.react('plot-pareto', [trace_true_pareto, trace_obj_obs, trace_obj_pareto, trace_obj_next], layout_obj, {displayModeBar: false});
+    }
+
+    function sampleNextPoint() {
+        if (next_x_candidate !== null) {
+            X_train.push(next_x_candidate);
+            Y1_train.push(f1_true(next_x_candidate));
+            Y2_train.push(f2_true(next_x_candidate));
+            updateCharts();
+        }
+    }
+
+    restart();
+</script>
+
+</body>
+</html>

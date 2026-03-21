@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>1D Bayesian Optimization Demo - Advanced</title>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background-color: #f9f9f9; }
+        .container { max-width: 900px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #333; }
+        .controls { text-align: center; margin-bottom: 20px; padding: 15px; background: #f1f3f5; border-radius: 8px; }
+        .control-group { margin: 10px 0; display: flex; justify-content: center; align-items: center; gap: 15px; }
+        select, input[type="range"] { padding: 5px; font-size: 14px; }
+        button { padding: 10px 20px; font-size: 15px; font-weight: bold; color: white; background-color: #007BFF; border: none; border-radius: 5px; cursor: pointer; transition: background 0.3s; margin: 0 5px; }
+        button:hover { background-color: #0056b3; }
+        .btn-restart { background-color: #28a745; }
+        .btn-restart:hover { background-color: #218838; }
+        .info { text-align: center; margin-top: 15px; color: #555; font-weight: bold; }
+        #chart { width: 100%; height: 600px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Bayesian Optimization Interactive Demo</h2>
+    
+    <div class="controls">
+        <div class="control-group">
+            <label for="afSelect"><strong>획득 함수 (Acquisition Function):</strong></label>
+            <select id="afSelect" onchange="updateChart()">
+                <option value="UCB">UCB (Upper Confidence Bound)</option>
+                <option value="EI">EI (Expected Improvement)</option>
+                <option value="PI">PI (Probability of Improvement)</option>
+            </select>
+        </div>
+        
+        <div class="control-group">
+            <label for="kappaSlider"><strong id="paramLabel">탐색 파라미터 (κ):</strong> <span id="paramValue">2.00</span></label>
+            <input type="range" id="kappaSlider" min="0" max="5" step="0.1" value="2.0" oninput="updateChart()">
+        </div>
+
+        <div>
+            <button class="btn-restart" onclick="restart()">새로 시작 (Restart)</button>
+            <button id="nextBtn" onclick="sampleNextPoint()">선정된 다음 관측점 추가하기</button>
+        </div>
+        <div class="info" id="infoText">현재 관측된 데이터: 2개</div>
+    </div>
+    
+    <div id="chart"></div>
+</div>
+
+<script>
+    // 1. 초기 설정 및 난수 기반 실제 함수(True Function) 생성기
+    const X_test = Array.from({length: 100}, (_, i) => i * 10 / 99);
+    let true_function;
+    let Y_true = new Array(100);
+    let X_train = [];
+    let Y_train = [];
+    let next_x_candidate = null;
+
+    // 임의의 부드러운 함수를 생성하는 함수
+    function generateRandomTrueFunction() {
+        const a = Math.random() * 2 - 1; // -1 ~ 1
+        const b = Math.random() * 2 - 1;
+        const c = Math.random() * 2 - 1;
+        const w1 = Math.random() * 1.5 + 0.5;
+        const w2 = Math.random() * 1.5 + 0.5;
+        const w3 = Math.random() * 1.5 + 0.5;
+        return (x) => a * Math.sin(w1 * x) + b * Math.cos(w2 * x) + c * Math.sin(w3 * x);
+    }
+
+    // 초기화 함수 (Restart 버튼 클릭 시 실행)
+    function restart() {
+        true_function = generateRandomTrueFunction();
+        Y_true = X_test.map(true_function);
+
+        // 무작위로 서로 떨어진 초기 관측점 2개 선택
+        let idx1 = Math.floor(Math.random() * 100);
+        let idx2 = Math.floor(Math.random() * 100);
+        while (Math.abs(idx1 - idx2) < 20) { // 너무 가깝지 않게 조정
+            idx2 = Math.floor(Math.random() * 100);
+        }
+
+        X_train = [X_test[idx1], X_test[idx2]];
+        Y_train = [Y_true[idx1], Y_true[idx2]];
+        next_x_candidate = null;
+
+        updateChart();
+    }
+
+    // 통계 함수 (표준 정규 분포의 PDF 및 CDF)
+    const normalPDF = (x) => Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
+    const normalCDF = (x) => 0.5 * (1 + math.erf(x / Math.sqrt(2)));
+
+    // 2. 가우시안 프로세스 계산
+    function computeGP(x_train, y_train, x_test) {
+        const l = 1.0; 
+        const sigma_f = 1.0; 
+        const sigma_n = 0.05; 
+        const N = x_train.length;
+        const M = x_test.length;
+        const kernel = (x1, x2) => Math.pow(sigma_f, 2) * Math.exp(-0.5 * Math.pow(x1 - x2, 2) / Math.pow(l, 2));
+
+        let K = [];
+        for (let i = 0; i < N; i++) {
+            K[i] = [];
+            for (let j = 0; j < N; j++) {
+                K[i][j] = kernel(x_train[i], x_train[j]) + (i === j ? Math.pow(sigma_n, 2) : 0);
+            }
+        }
+
+        const K_inv = math.inv(K);
+        let mean = [];
+        let std = [];
+        let Y_train_mat = math.matrix(y_train.map(y => [y]));
+
+        for (let i = 0; i < M; i++) {
+            let k_star = [];
+            for (let j = 0; j < N; j++) {
+                k_star.push(kernel(x_test[i], x_train[j]));
+            }
+            let k_star_mat = math.matrix([k_star]);
+            let mu = math.multiply(math.multiply(k_star_mat, K_inv), Y_train_mat).get([0, 0]);
+            mean.push(mu);
+
+            let k_star_star = kernel(x_test[i], x_test[i]);
+            let k_star_T = math.transpose(k_star_mat);
+            let v = k_star_star - math.multiply(math.multiply(k_star_mat, K_inv), k_star_T).get([0, 0]);
+            std.push(Math.sqrt(Math.max(v, 0))); 
+        }
+        return { mean, std };
+    }
+
+    // 3. 차트 업데이트 함수
+    function updateChart() {
+        const { mean, std } = computeGP(X_train, Y_train, X_test);
+        const upper_bound = mean.map((m, i) => m + 2 * std[i]);
+        const lower_bound = mean.map((m, i) => m - 2 * std[i]);
+
+        const afType = document.getElementById('afSelect').value;
+        const paramValue = parseFloat(document.getElementById('kappaSlider').value);
+        
+        document.getElementById('paramValue').innerText = paramValue.toFixed(2);
+        document.getElementById('paramLabel').innerText = afType === 'UCB' ? '탐색 파라미터 (κ):' : '탐색 파라미터 (ξ):';
+
+        const y_best = Math.max(...Y_train);
+
+        // 획득 함수 계산
+        const acq = mean.map((m, i) => {
+            const s = std[i];
+            if (afType === 'UCB') {
+                return m + paramValue * s;
+            } else {
+                if (s < 1e-9) return 0;
+                const Z = (m - y_best - paramValue) / s;
+                if (afType === 'PI') {
+                    return normalCDF(Z);
+                } else if (afType === 'EI') {
+                    return (m - y_best - paramValue) * normalCDF(Z) + s * normalPDF(Z);
+                }
+            }
+        });
+
+        const max_acq = Math.max(...acq);
+        const max_index = acq.indexOf(max_acq);
+        next_x_candidate = X_test[max_index];
+        const next_y_candidate_mean = mean[max_index];
+
+        // Plotly 차트 데이터
+        const trace_upper = { x: X_test, y: upper_bound, mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'none' };
+        const trace_lower = { x: X_test, y: lower_bound, mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(0, 123, 255, 0.2)', line: { width: 0 }, name: 'Uncertainty (±2σ)', hoverinfo: 'none' };
+        const trace_true = { x: X_test, y: Y_true, mode: 'lines', name: 'True Function', line: { dash: 'dash', color: 'rgba(0,0,0,0.3)' } };
+        const trace_mean = { x: X_test, y: mean, mode: 'lines', name: 'GP Mean', line: { color: '#007BFF', width: 2 } };
+        const trace_obs = { x: X_train, y: Y_train, mode: 'markers', name: 'Observations', marker: { size: 10, color: 'black' } };
+        
+        // 상단 그래프의 다음 관측점
+        const trace_next = { x: [next_x_candidate], y: [next_y_candidate_mean], mode: 'markers', name: 'Next Point (Mean)', marker: { symbol: 'star', size: 15, color: 'red' } };
+        
+        // 획득 함수 그래프
+        const trace_acq = { x: X_test, y: acq, mode: 'lines', name: `Acquisition (${afType})`, xaxis: 'x', yaxis: 'y2', line: { color: 'green' }, fill: 'tozeroy', fillcolor: 'rgba(0, 128, 0, 0.1)' };
+        
+        // 하단 획득 함수 그래프의 다음 관측점 (최댓값 위치)
+        const trace_next_acq = { x: [next_x_candidate], y: [max_acq], mode: 'markers', xaxis: 'x', yaxis: 'y2', showlegend: false, hoverinfo: 'none', marker: { symbol: 'star', size: 15, color: 'red' } };
+
+        const layout = {
+            grid: { rows: 2, columns: 1, pattern: 'independent' },
+            yaxis: { domain: [0.35, 1], title: 'Objective Value' },
+            yaxis2: { domain: [0, 0.25], title: 'Acquisition Value' },
+            xaxis: { title: 'Input X' },
+            hovermode: 'x unified',
+            showlegend: true,
+            legend: { orientation: "h", y: 1.1 },
+            margin: { t: 40 }
+        };
+
+        Plotly.react('chart', [trace_upper, trace_lower, trace_true, trace_mean, trace_obs, trace_next, trace_acq, trace_next_acq], layout);
+        document.getElementById('infoText').innerText = `현재 관측된 데이터: ${X_train.length}개`;
+    }
+
+    // 4. 관측점 추가
+    function sampleNextPoint() {
+        if (next_x_candidate !== null) {
+            X_train.push(next_x_candidate);
+            Y_train.push(true_function(next_x_candidate));
+            updateChart();
+        }
+    }
+
+    // 스크립트 로드 시 최초 1회 초기화 실행
+    restart();
+</script>
+
+</body>
+</html>

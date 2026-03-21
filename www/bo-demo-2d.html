@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>2D Bayesian Optimization Demo</title>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f0f2f5; }
+        .dashboard { display: grid; grid-template-columns: 300px 1fr; gap: 20px; max-width: 1400px; margin: 0 auto; }
+        
+        /* 왼쪽 컨트롤 패널 */
+        .sidebar { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); height: fit-content; }
+        .sidebar h2 { margin-top: 0; color: #333; font-size: 20px; }
+        .control-group { margin-bottom: 20px; }
+        .control-group label { display: block; font-weight: bold; margin-bottom: 8px; color: #555; }
+        .checkbox-group { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; }
+        .checkbox-group label { margin-bottom: 0; font-weight: normal; cursor: pointer; }
+        .checkbox-group input { width: auto; cursor: pointer; transform: scale(1.2); }
+        
+        select, input[type="range"] { width: 100%; padding: 8px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; font-size: 16px; font-weight: bold; color: white; background-color: #4CAF50; border: none; border-radius: 6px; cursor: pointer; transition: background 0.3s; margin-bottom: 10px; }
+        button:hover { background-color: #45a049; }
+        .btn-restart { background-color: #f44336; }
+        .btn-restart:hover { background-color: #da190b; }
+        .stats { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 20px; border: 1px solid #ddd; }
+        
+        /* 오른쪽 차트 그리드 */
+        .chart-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 15px; }
+        .chart-container { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 10px; }
+        .chart-title { text-align: center; font-weight: bold; margin-bottom: 5px; color: #333; }
+        .plot { width: 100%; height: 350px; }
+    </style>
+</head>
+<body>
+
+<div class="dashboard">
+    <div class="sidebar">
+        <h2>2D BO Controls</h2>
+        
+        <div class="control-group">
+            <label for="afSelect">Acquisition Function:</label>
+            <select id="afSelect" onchange="updateCharts()">
+                <option value="UCB">UCB (Upper Conf. Bound)</option>
+                <option value="EI">EI (Expected Improvement)</option>
+                <option value="PI">PI (Prob. of Improvement)</option>
+            </select>
+        </div>
+        
+        <div class="control-group">
+            <label for="kappaSlider"><span id="paramLabel">Exploration Param (κ):</span> <span id="paramValue">2.0</span></label>
+            <input type="range" id="kappaSlider" min="0" max="5" step="0.1" value="2.0" oninput="updateCharts()">
+        </div>
+
+        <div class="checkbox-group">
+            <input type="checkbox" id="showLinesCheck" checked onchange="updateCharts()">
+            <label for="showLinesCheck"><strong>등고선 선 표시</strong></label>
+        </div>
+
+        <button id="nextBtn" onclick="sampleNextPoint()">선정된 다음 관측점 추가</button>
+        <button class="btn-restart" onclick="restart()">새로 시작 (Restart)</button>
+
+        <div class="stats">
+            <p><strong>관측 횟수:</strong> <span id="statCount">0</span></p>
+            <p><strong>발견된 최적값 (Z):</strong> <span id="statBest">0.000</span></p>
+        </div>
+    </div>
+
+    <div class="chart-grid">
+        <div class="chart-container">
+            <div class="chart-title">Target Function (Unknown)</div>
+            <div id="plot-true" class="plot"></div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title">Surrogate Model (Mean)</div>
+            <div id="plot-mean" class="plot"></div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title">Surrogate Model (Variance)</div>
+            <div id="plot-var" class="plot"></div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-title">Acquisition Function</div>
+            <div id="plot-acq" class="plot"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 1. 초기 설정 (2D 그리드 및 실제 함수)
+    const gridSize = 35;
+    const x_linspace = Array.from({length: gridSize}, (_, i) => i * 10 / (gridSize - 1));
+    const y_linspace = Array.from({length: gridSize}, (_, i) => i * 10 / (gridSize - 1));
+    
+    let true_function;
+    let Z_true = [];
+    let X_train = [];
+    let Y_train = [];
+    let next_candidate = null;
+
+    // 복잡한 2D 지형 생성을 위한 무작위 함수
+    function generateRandomTrueFunction() {
+        const cx1 = 2 + Math.random() * 6; const cy1 = 2 + Math.random() * 6;
+        const cx2 = 2 + Math.random() * 6; const cy2 = 2 + Math.random() * 6;
+        const w = 1 + Math.random() * 2;
+        return (x, y) => {
+            const p1 = Math.exp(-((x - cx1)**2 + (y - cy1)**2) / 4);
+            const p2 = 0.8 * Math.exp(-((x - cx2)**2 + (y - cy2)**2) / 3);
+            const wave = 0.2 * Math.sin(w * x) * Math.cos(w * y);
+            return p1 + p2 + wave;
+        };
+    }
+
+    const normalPDF = (x) => Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
+    const normalCDF = (x) => 0.5 * (1 + math.erf(x / Math.sqrt(2)));
+
+    function restart() {
+        true_function = generateRandomTrueFunction();
+        
+        Z_true = [];
+        for (let j = 0; j < gridSize; j++) {
+            let row = [];
+            for (let i = 0; i < gridSize; i++) {
+                row.push(true_function(x_linspace[i], y_linspace[j]));
+            }
+            Z_true.push(row);
+        }
+
+        X_train = [];
+        Y_train = [];
+        for(let k=0; k<3; k++) {
+            const rx = Math.random() * 10;
+            const ry = Math.random() * 10;
+            X_train.push([rx, ry]);
+            Y_train.push(true_function(rx, ry));
+        }
+
+        updateCharts();
+    }
+
+    // 2. 2D 가우시안 프로세스 계산
+    function computeGP() {
+        const l = 1.5; 
+        const sigma_f = 1.0; 
+        const sigma_n = 0.01; 
+        const N = X_train.length;
+
+        const kernel = (x1, x2) => {
+            const distSq = Math.pow(x1[0] - x2[0], 2) + Math.pow(x1[1] - x2[1], 2);
+            return Math.pow(sigma_f, 2) * Math.exp(-0.5 * distSq / Math.pow(l, 2));
+        };
+
+        let K = [];
+        for (let i = 0; i < N; i++) {
+            K[i] = [];
+            for (let j = 0; j < N; j++) {
+                K[i][j] = kernel(X_train[i], X_train[j]) + (i === j ? Math.pow(sigma_n, 2) : 0);
+            }
+        }
+
+        const K_inv = math.inv(K);
+        let Y_train_mat = math.matrix(Y_train.map(y => [y]));
+        let alpha = math.multiply(K_inv, Y_train_mat);
+
+        let mean_grid = [];
+        let std_grid = [];
+
+        for (let j = 0; j < gridSize; j++) {
+            let mean_row = [];
+            let std_row = [];
+            const y_test = y_linspace[j];
+            
+            for (let i = 0; i < gridSize; i++) {
+                const x_test = x_linspace[i];
+                const pt = [x_test, y_test];
+
+                let k_star = [];
+                for (let n = 0; n < N; n++) {
+                    k_star.push(kernel(pt, X_train[n]));
+                }
+                
+                let k_star_mat = math.matrix([k_star]);
+                let mu = math.multiply(k_star_mat, alpha).get([0, 0]);
+                mean_row.push(mu);
+
+                let k_star_star = kernel(pt, pt);
+                let k_star_T = math.transpose(k_star_mat);
+                let v = k_star_star - math.multiply(math.multiply(k_star_mat, K_inv), k_star_T).get([0, 0]);
+                std_row.push(Math.sqrt(Math.max(v, 0)));
+            }
+            mean_grid.push(mean_row);
+            std_grid.push(std_row);
+        }
+        return { mean_grid, std_grid };
+    }
+
+    // 3. 차트 업데이트 로직
+    function updateCharts() {
+        const { mean_grid, std_grid } = computeGP();
+        const afType = document.getElementById('afSelect').value;
+        const paramValue = parseFloat(document.getElementById('kappaSlider').value);
+        const showLines = document.getElementById('showLinesCheck').checked;
+        
+        document.getElementById('paramValue').innerText = paramValue.toFixed(2);
+        document.getElementById('paramLabel').innerText = afType === 'UCB' ? '탐색 파라미터 (κ):' : '탐색 파라미터 (ξ):';
+
+        const y_best = Math.max(...Y_train);
+        
+        document.getElementById('statCount').innerText = X_train.length;
+        document.getElementById('statBest').innerText = y_best.toFixed(4);
+
+        let acq_grid = [];
+        let max_acq = -Infinity;
+        let best_acq_idx = [0, 0];
+
+        for (let j = 0; j < gridSize; j++) {
+            let acq_row = [];
+            for (let i = 0; i < gridSize; i++) {
+                const m = mean_grid[j][i];
+                const s = std_grid[j][i];
+                let val = 0;
+
+                if (afType === 'UCB') {
+                    val = m + paramValue * s;
+                } else {
+                    if (s > 1e-9) {
+                        const Z = (m - y_best - paramValue) / s;
+                        if (afType === 'PI') val = normalCDF(Z);
+                        else if (afType === 'EI') val = (m - y_best - paramValue) * normalCDF(Z) + s * normalPDF(Z);
+                    }
+                }
+                acq_row.push(val);
+
+                if (val > max_acq) {
+                    max_acq = val;
+                    best_acq_idx = [i, j]; 
+                }
+            }
+            acq_grid.push(acq_row);
+        }
+
+        next_candidate = [x_linspace[best_acq_idx[0]], y_linspace[best_acq_idx[1]]];
+
+        const commonLayout = { margin: {l: 30, r: 10, b: 30, t: 10}, xaxis: {range: [0, 10]}, yaxis: {range: [0, 10]}, showlegend: false };
+
+        const obs_trace = { 
+            x: X_train.map(pt => pt[0]), 
+            y: X_train.map(pt => pt[1]), 
+            mode: 'markers', 
+            marker: {
+                color: 'white', 
+                size: 10, 
+                line: { color: 'black', width: 2 }
+            }, 
+            type: 'scatter' 
+        };
+        
+        const next_trace = { x: [next_candidate[0]], y: [next_candidate[1]], mode: 'markers', marker: {color: 'red', size: 14, symbol: 'star'}, type: 'scatter' };
+
+        // ★ 버그 수정: 선 두께(width)를 0으로 설정하여 선을 완전히 숨김
+        const contourSettings = { coloring: 'heatmap', showlines: showLines };
+        const lineSettings = { width: showLines ? 1 : 0 }; 
+
+        Plotly.react('plot-true', [
+            { z: Z_true, x: x_linspace, y: y_linspace, type: 'contour', colorscale: 'Viridis', contours: contourSettings, line: lineSettings },
+            obs_trace
+        ], commonLayout, {displayModeBar: false});
+
+        Plotly.react('plot-mean', [
+            { z: mean_grid, x: x_linspace, y: y_linspace, type: 'contour', colorscale: 'Viridis', contours: contourSettings, line: lineSettings },
+            obs_trace, next_trace
+        ], commonLayout, {displayModeBar: false});
+
+        Plotly.react('plot-var', [
+            { z: std_grid, x: x_linspace, y: y_linspace, type: 'contour', colorscale: 'Cividis', contours: contourSettings, line: lineSettings },
+            obs_trace
+        ], commonLayout, {displayModeBar: false});
+
+        Plotly.react('plot-acq', [
+            { z: acq_grid, x: x_linspace, y: y_linspace, type: 'contour', colorscale: 'YlGnBu', contours: contourSettings, line: lineSettings },
+            next_trace
+        ], commonLayout, {displayModeBar: false});
+    }
+
+    function sampleNextPoint() {
+        if (next_candidate) {
+            X_train.push([next_candidate[0], next_candidate[1]]);
+            Y_train.push(true_function(next_candidate[0], next_candidate[1]));
+            updateCharts();
+        }
+    }
+
+    restart();
+</script>
+
+</body>
+</html>
