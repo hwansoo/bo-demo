@@ -171,7 +171,7 @@
         const trace_upper = { x: X_test, y: upper_bound, mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'none' };
         const trace_lower = { x: X_test, y: lower_bound, mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(0, 123, 255, 0.2)', line: { width: 0 }, name: 'Uncertainty (±2σ)', hoverinfo: 'none' };
         const trace_true = { x: X_test, y: Y_true, mode: 'lines', name: 'True Function', line: { dash: 'dash', color: 'rgba(0,0,0,0.3)' } };
-        const trace_mean = { x: X_test, y: mean, mode: 'lines', name: 'GP Mean', line: { color: '#007BFF', width: 2 } };
+        const trace_mean = { x: X_test, y: mean, mode: 'lines', name: 'GP Mean (Surrogate)', line: { color: '#007BFF', width: 2 } };
         const trace_obs = { x: X_train, y: Y_train, mode: 'markers', name: 'Observations', marker: { size: 10, color: 'black' } };
         
         // 상단 그래프의 다음 관측점
