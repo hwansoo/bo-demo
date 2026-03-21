@@ -439,7 +439,7 @@
         const gp = computeGP(s2_x, s2_y, selectedKernel);
         
         const trace_true = { x: X_test, y: Y_true, mode: 'lines', line: { dash: 'dash', color: 'rgba(0,0,0,0.2)' }, name: '숨겨진 곡선' };
-        const trace_mean = { x: X_test, y: gp.mean, mode: 'lines', line: { color: '#007bff', width: 3 }, name: 'AI의 추론 (평균값)' };
+        const trace_mean = { x: X_test, y: gp.mean, mode: 'lines', line: { color: '#007bff', width: 3 }, name: '베이지안 추론 (평균값)' };
         const trace_unc = { x: X_test.concat(X_test.slice().reverse()), y: gp.mean.map((m,i)=>m+2*gp.std[i]).concat(gp.mean.map((m,i)=>m-2*gp.std[i]).reverse()), fill: 'toself', fillcolor: 'rgba(0,123,255,0.2)', line: {color: 'transparent'}, name: '불확실성 (오차 범위)' };
         const trace_obs = { x: s2_x, y: s2_y, mode: 'markers', marker: { color: 'black', size: 10, line: {color:'white', width:2} }, name: '실험 데이터' };
         Plotly.react('plot2', [trace_unc, trace_true, trace_mean, trace_obs], layout_base, {displayModeBar: false});
@@ -513,7 +513,7 @@
         const trace_obs = { x: s4_x, y: s4_y, mode: 'markers+text', text: s4_x.map((_, i) => i+1), textposition: 'top center', textfont: {size: 14, color: 'black'}, marker: { color: 'black', size: 10, line: {color:'white', width:2} }, name: '수행된 실험 순서' };
         
         const trace_acq = { x: X_test, y: acq, mode: 'lines', fill: 'tozeroy', fillcolor: 'rgba(40, 167, 69, 0.2)', line: { color: '#28a745' }, yaxis: 'y2', name: '다음 실험 추천 점수' };
-        const trace_star = { x: [next_cand_s4], y: [gp.mean[acq.indexOf(max_acq)]], mode: 'markers', marker: { symbol: 'star', size: 16, color: 'red' }, name: 'AI의 다음 추천' };
+        const trace_star = { x: [next_cand_s4], y: [gp.mean[acq.indexOf(max_acq)]], mode: 'markers', marker: { symbol: 'star', size: 16, color: 'red' }, name: '알고리즘의 추천' };
 
         const layout4 = { 
             grid: {rows: 2, columns: 1, pattern: 'independent'},
