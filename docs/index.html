@@ -252,7 +252,7 @@
     <div id="step2" class="content">
         <h2>2. 모르는 것을 아는 것 (대리 모델, Surrogate Model)</h2>
         <div class="description">
-            베이지안 최적화는 몇 개의 초기 실험 데이터만으로 <strong>전체 그래프의 모양을 유추</strong>합니다 (파란 실선).<br>
+            베이지안 추론에서는 몇 개의 초기 실험 데이터만으로 <strong>전체 그래프의 모양을 유추</strong>합니다 (파란 실선).<br>
             데이터가 없는 곳의 불확실성을 파란색 음영으로 계산합니다.<br>
             <strong>💡 드롭다운 메뉴에서 커널을 변경해 가며, 인공지능이 곡선을 '얼마나 매끄럽게' 이으려고 하는지 비교해 보세요!</strong>
         </div>
@@ -439,8 +439,8 @@
         const gp = computeGP(s2_x, s2_y, selectedKernel);
         
         const trace_true = { x: X_test, y: Y_true, mode: 'lines', line: { dash: 'dash', color: 'rgba(0,0,0,0.2)' }, name: '숨겨진 곡선' };
-        const trace_mean = { x: X_test, y: gp.mean, mode: 'lines', line: { color: '#007bff', width: 3 }, name: '베이지안 추론 (평균값)' };
-        const trace_unc = { x: X_test.concat(X_test.slice().reverse()), y: gp.mean.map((m,i)=>m+2*gp.std[i]).concat(gp.mean.map((m,i)=>m-2*gp.std[i]).reverse()), fill: 'toself', fillcolor: 'rgba(0,123,255,0.2)', line: {color: 'transparent'}, name: '불확실성 (오차 범위)' };
+        const trace_mean = { x: X_test, y: gp.mean, mode: 'lines', line: { color: '#007bff', width: 3 }, name: '베이지안 사후 평균 (Posterior Mean)' };
+        const trace_unc = { x: X_test.concat(X_test.slice().reverse()), y: gp.mean.map((m,i)=>m+2*gp.std[i]).concat(gp.mean.map((m,i)=>m-2*gp.std[i]).reverse()), fill: 'toself', fillcolor: 'rgba(0,123,255,0.2)', line: {color: 'transparent'}, name: '사후 불확실성 (Posterior Std Dev)' };
         const trace_obs = { x: s2_x, y: s2_y, mode: 'markers', marker: { color: 'black', size: 10, line: {color:'white', width:2} }, name: '실험 데이터' };
         Plotly.react('plot2', [trace_unc, trace_true, trace_mean, trace_obs], layout_base, {displayModeBar: false});
     }
