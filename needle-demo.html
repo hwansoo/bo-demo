@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Needle in a Haystack - Bayesian Optimization</title>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f4f6f9; color: #333; }
+        .dashboard { display: grid; grid-template-columns: 350px 1fr; gap: 20px; max-width: 1400px; margin: 0 auto; }
+        
+        /* 왼쪽 컨트롤 패널 */
+        .sidebar { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); height: fit-content; }
+        .sidebar h2 { margin-top: 0; color: #2c3e50; font-size: 20px; margin-bottom: 5px; }
+        .subtitle { color: #e74c3c; font-size: 14px; margin-bottom: 20px; font-weight: bold; }
+        
+        .description { font-size: 13px; line-height: 1.5; color: #555; background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 20px; border-left: 3px solid #e74c3c; }
+        
+        .control-group { margin-bottom: 20px; }
+        .control-group label { display: block; font-weight: bold; margin-bottom: 8px; color: #34495e; font-size: 14px; }
+        
+        /* 핵심: 길이 척도 박스 */
+        .length-box { background: #e8f4f8; padding: 15px; border-radius: 8px; border: 1px solid #b3e5fc; margin-bottom: 20px; }
+        .length-box label { color: #0277bd; margin-bottom: 10px; }
+        .length-box small { color: #0288d1; display: block; margin-top: 8px; line-height: 1.4; font-size: 12px; }
+        
+        input[type="range"] { width: 100%; padding: 8px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; font-size: 15px; font-weight: bold; color: white; background-color: #e74c3c; border: none; border-radius: 6px; cursor: pointer; transition: background 0.3s; margin-bottom: 10px; }
+        button:hover { background-color: #c0392b; }
+        .btn-restart { background-color: #7f8c8d; }
+        .btn-restart:hover { background-color: #34495e; }
+        
+        .stats { background: #fff; padding: 15px; border-radius: 8px; margin-top: 10px; border: 1px solid #ddd; font-size: 14px; }
+        
+        /* 오른쪽 차트 */
+        .chart-container { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); padding: 15px; }
+        .plot { width: 100%; height: 600px; }
+    </style>
+</head>
+<body>
+
+<div class="dashboard">
+    <div class="sidebar">
+        <h2>건초더미에서 바늘 찾기</h2>
+        <div class="subtitle">(Needle-in-a-Haystack Problem)</div>
+        
+        <div class="description">
+            대부분의 영역은 성능이 0 근처지만, <strong>어딘가에 아주 좁고 뾰족한 최적점(바늘)</strong>이 숨어있습니다.<br>
+            현재 초기 실험 3번을 진행했지만, 모두 바늘을 비껴가서 꽝(0)이 나왔습니다. 모델은 바늘의 존재를 어떻게 눈치챌 수 있을까요?
+        </div>
+
+        <div class="length-box">
+            <label for="lSlider"><strong>길이 척도 (Length Scale, l):</strong> <span id="lValue">1.50</span></label>
+            <input type="range" id="lSlider" min="0.1" max="3.0" step="0.1" value="1.5" oninput="updateChart()">
+            <small>
+                ▶ <strong>크게 (ex. 2.0):</strong> "세상은 부드러울거야" (바늘을 아예 예상 못함, 탐색 포기)<br>
+                ▶ <strong>작게 (ex. 0.2):</strong> "곳곳에 바늘이 있을 수 있어" (모든 곳을 의심하며 촘촘히 탐색함, 대신 시간이 오래 걸림)
+            </small>
+        </div>
+        
+        <div class="control-group">
+            <label for="kappaSlider">탐색 파라미터 (κ): <span id="kappaValue">3.0</span></label>
+            <input type="range" id="kappaSlider" min="0" max="10" step="0.5" value="3.0" oninput="updateChart()">
+        </div>
+
+        <button id="nextBtn" onclick="sampleNextPoint()">선정된 다음 관측점 추가</button>
+        <button class="btn-restart" onclick="restart()">새로 시작 (Restart)</button>
+
+        <div class="stats">
+            <p><strong>실험 횟수:</strong> <span id="statCount">3</span>번</p>
+            <p><strong>발견한 최고 성능:</strong> <span id="statBest">0.00</span></p>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <div id="plot-main" class="plot"></div>
+    </div>
+</div>
+
+<script>
+    // 1. 초기 설정 (바늘을 세밀하게 그리기 위해 점을 250개로 촘촘하게 설정)
+    const X_test = Array.from({length: 250}, (_, i) => i * 10 / 249);
+    
+    // Needle-in-a-haystack 함수: 기본적으로 약간의 굴곡(0 근처) + 특정 위치(x=6.8)에 아주 좁고 높은 피크
+    const true_function = (x) => 0.1 * Math.sin(x) + 3.0 * Math.exp(-40 * Math.pow(x - 6.8, 2));
+    const Y_true = X_test.map(true_function);
+
+    let X_train = [];
+    let Y_train = [];
+    let next_candidate = null;
+
+    // GP 모델 계산 (Matérn 5/2 커널 사용하되, Length Scale(l)을 UI에서 받아옴)
+    function computeGP(l_scale) {
+        const sigma_f = 1.0; 
+        const sigma_n = 0.01; // 노이즈를 작게 줘서 불확실성 증폭 효과를 명확히 함
+        const N = X_train.length; 
+        const M = X_test.length;
+
+        // Matern 5/2 커널 (l_scale 적용)
+        const kernel = (x1, x2) => {
+            const d = Math.abs(x1 - x2);
+            const val = Math.sqrt(5) * d / l_scale;
+            return Math.pow(sigma_f, 2) * (1 + val + (5 * d * d) / (3 * l_scale * l_scale)) * Math.exp(-val);
+        };
+
+        if(N === 0) return { mean: Array(M).fill(0), std: Array(M).fill(sigma_f) };
+
+        let K = [];
+        for (let i = 0; i < N; i++) {
+            K[i] = [];
+            for (let j = 0; j < N; j++) K[i][j] = kernel(X_train[i], X_train[j]) + (i === j ? Math.pow(sigma_n, 2) : 0);
+        }
+        const K_inv = math.inv(math.matrix(K));
+        let alpha = math.multiply(K_inv, math.matrix(Y_train.map(y => [y])));
+
+        let mean = [], std = [];
+        for (let i = 0; i < M; i++) {
+            let k_star = [];
+            for (let j = 0; j < N; j++) k_star.push(kernel(X_test[i], X_train[j]));
+            let k_star_mat = math.matrix([k_star]);
+            mean.push(math.multiply(k_star_mat, alpha).get([0, 0]));
+            let v = kernel(X_test[i], X_test[i]) - math.multiply(math.multiply(k_star_mat, K_inv), math.transpose(k_star_mat)).get([0, 0]);
+            std.push(Math.sqrt(Math.max(v, 0)));
+        }
+        return { mean, std };
+    }
+
+    function restart() {
+        // 초기 실험 3개 (바늘이 있는 6.8을 교묘하게 비껴간 위치들)
+        X_train = [1.5, 4.5, 9.0]; 
+        Y_train = X_train.map(true_function);
+        
+        // 슬라이더 초기화
+        document.getElementById('lSlider').value = 1.5;
+        document.getElementById('kappaSlider').value = 3.0;
+        
+        updateChart();
+    }
+
+    function updateChart() {
+        const l_scale = parseFloat(document.getElementById('lSlider').value);
+        const kappa = parseFloat(document.getElementById('kappaSlider').value);
+        
+        document.getElementById('lValue').innerText = l_scale.toFixed(2);
+        document.getElementById('kappaValue').innerText = kappa.toFixed(1);
+
+        const gp = computeGP(l_scale);
+        
+        let acq = [];
+        for(let i=0; i<X_test.length; i++) acq.push(gp.mean[i] + kappa * gp.std[i]);
+        
+        let max_acq = Math.max(...acq);
+        let max_idx = acq.indexOf(max_acq);
+        next_candidate = X_test[max_idx];
+
+        document.getElementById('statCount').innerText = X_train.length;
+        document.getElementById('statBest').innerText = Math.max(...Y_train).toFixed(2);
+
+        const layout = { 
+            grid: {rows: 2, columns: 1, pattern: 'independent'},
+            yaxis: { domain: [0.4, 1], title: '성능 예측', range: [-1, 4] }, 
+            yaxis2: { domain: [0, 0.3], title: '획득 함수 (UCB)' },
+            xaxis: { title: '입력 변수 X' }, 
+            margin: {l: 50, r: 20, b: 40, t: 10}, 
+            showlegend: true, legend: {orientation: "h", y: 1.1}
+        };
+
+        const trace_true = { x: X_test, y: Y_true, mode: 'lines', line: { dash: 'dash', color: 'rgba(0,0,0,0.2)' }, name: '숨겨진 진짜 지형 (바늘)' };
+        const trace_mean = { x: X_test, y: gp.mean, mode: 'lines', line: { color: '#007bff', width: 2 }, name: '모델의 평균 예측' };
+        const trace_unc = { x: X_test.concat(X_test.slice().reverse()), y: gp.mean.map((m,i)=>m+2*gp.std[i]).concat(gp.mean.map((m,i)=>m-2*gp.std[i]).reverse()), fill: 'toself', fillcolor: 'rgba(0,123,255,0.2)', line: {color: 'transparent'}, name: '불확실성' };
+        const trace_obs = { x: X_train, y: Y_train, mode: 'markers', marker: { color: 'black', size: 10, line: {color:'white', width:2} }, name: '수행된 실험' };
+        
+        const trace_acq = { x: X_test, y: acq, mode: 'lines', fill: 'tozeroy', fillcolor: 'rgba(231, 76, 60, 0.2)', line: { color: '#e74c3c' }, yaxis: 'y2', name: '다음 실험 추천 점수' };
+        const trace_star = { x: [next_candidate], y: [gp.mean[max_idx]], mode: 'markers', marker: { symbol: 'star', size: 16, color: 'red' }, name: 'AI 추천 위치' };
+        const trace_star_acq = { x: [next_candidate], y: [max_acq], mode: 'markers', marker: { symbol: 'star', size: 16, color: 'red' }, yaxis: 'y2', showlegend: false };
+
+        Plotly.react('plot-main', [trace_unc, trace_true, trace_mean, trace_obs, trace_star, trace_acq, trace_star_acq], layout, {displayModeBar: false});
+    }
+
+    function sampleNextPoint() {
+        if(next_candidate !== null) {
+            X_train.push(next_candidate);
+            Y_train.push(true_function(next_candidate));
+            updateChart();
+        }
+    }
+
+    restart();
+</script>
+
+</body>
+</html>
