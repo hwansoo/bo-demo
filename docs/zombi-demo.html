@@ -3,6 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <title>ZoMBI vs Standard BO (Dramatic Demo)</title>
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']]
+      }
+    };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+    
     <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.min.js"></script>
     <style>
@@ -20,16 +29,17 @@
         .description { font-size: 13px; line-height: 1.5; color: #555; background: #fff3cd; padding: 12px; border-radius: 6px; margin-bottom: 15px; border-left: 4px solid #ffc107; }
         
         /* 비교 박스 */
-        .box-std { border-left: 5px solid #3498db; background: #ebf5fb; padding: 15px; margin-bottom: 15px; border-radius: 4px; }
+        .box-std { border-left: 5px solid #3498db; background: #ebf5fb; padding: 15px; margin-bottom: 15px; border-radius: 4px; position: relative; }
         .box-std h3 { margin: 0 0 10px 0; color: #2980b9; font-size: 16px; }
         
-        .box-zombi { border-left: 5px solid #e67e22; background: #fdf2e9; padding: 15px; margin-bottom: 20px; border-radius: 4px; }
+        .box-zombi { border-left: 5px solid #e67e22; background: #fdf2e9; padding: 15px; margin-bottom: 20px; border-radius: 4px; position: relative; }
         .box-zombi h3 { margin: 0 0 10px 0; color: #d35400; font-size: 16px; }
         
         .stat-line { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 14px; font-weight: bold;}
-        .stat-desc { font-size: 12px; color: #7f8c8d; margin-top: -3px; margin-bottom: 10px;}
+        .stat-desc { font-size: 12px; color: #7f8c8d; margin-top: -3px; margin-bottom: 10px; line-height: 1.4;}
         .highlight-red { color: #e74c3c; font-size: 16px; }
         .highlight-green { color: #27ae60; font-size: 16px; }
+        .status-text { color: #7f8c8d; }
         
         /* 버튼 */
         button { width: 100%; padding: 12px; font-size: 15px; font-weight: bold; color: white; background-color: #2c3e50; border: none; border-radius: 6px; cursor: pointer; transition: background 0.3s; margin-bottom: 10px; }
@@ -42,7 +52,7 @@
         @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.03); } 100% { transform: scale(1); } }
         
         /* 논문 정보 박스 */
-        .paper-info { background: #f8f9fa; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-top: 20px; font-size: 13px; color: #4a5568; line-height: 1.5; }
+        .paper-info { background: #f8f9fa; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-top: 20px; font-size: 13px; color: #4a5568; line-height: 1.6; }
         .paper-info strong.title { color: #2d3748; font-size: 15px; display: block; margin-bottom: 10px; border-bottom: 1px solid #cbd5e0; padding-bottom: 5px; }
         .paper-info .citation { margin: 0 0 10px 0; }
         .paper-info a { color: #3182ce; text-decoration: none; font-weight: bold; }
@@ -67,22 +77,25 @@
     <div class="sidebar">
         <h2>탐색 현황 비교</h2>
         <div class="description">
-            <strong>관전 포인트:</strong> 초기 3개의 점 중 하나가 바늘 근처의 '미세한 언덕(힌트)'에 떨어졌습니다. 일반 BO가 엄한 곳을 찌르는 동안 ZoMBI가 어떻게 공간을 좁히는지 확인하세요!
+            <strong>관전 포인트:</strong> 초기 3개의 점 중 하나가 바늘 근처의 '미세한 언덕(힌트)'에 떨어졌습니다. 일반 BO가 엄한 곳을 찌르는 동안 ZoMBI가 어떻게 공간을 좁히는지 확인하세요!<br>
+            (💡 바늘을 찾으면 해당 알고리즘은 카운트를 멈춥니다.)
         </div>
         
         <div class="box-std">
             <h3>1. 일반 BO (Standard)</h3>
+            <div class="stat-line"><span>상태:</span> <span id="std_status" class="status-text">탐색 중... 🔍</span></div>
             <div class="stat-line"><span>발견한 최고 성능:</span> <span id="std_best" class="highlight-red">0.000</span></div>
-            <div class="stat-line"><span>실험 횟수 (N):</span> <span id="std_n">3</span></div>
-            <div class="stat-desc">모든 곳의 불확실성을 확인하려다 연산량 낭비</div>
+            <div class="stat-line"><span>누적 데이터 수 (N):</span> <span id="std_n">3</span></div>
+            <div class="stat-desc">모든 데이터를 보존하며 탐색하여 연산량 $O(N^3)$ 폭증</div>
         </div>
         
         <div class="box-zombi">
             <h3>2. ZoMBI BO (Zooming 적용)</h3>
+            <div class="stat-line"><span>상태:</span> <span id="zombi_status" class="status-text">탐색 중... 🔍</span></div>
             <div class="stat-line"><span>발견한 최고 성능:</span> <span id="zombi_best" class="highlight-green">0.000</span></div>
-            <div class="stat-line"><span>데이터 횟수 (N):</span> <span id="zombi_n">3</span></div>
-            <div class="stat-desc">힌트 주변으로 경계 축소 & 잉여 데이터 삭제</div>
-            <div class="stat-line"><span>현재 탐색 경계:</span> <span id="zombi_bounds" style="color:#e67e22;">[0.00, 20.00]</span></div>
+            <div class="stat-line"><span>유지 데이터 수 (N):</span> <span id="zombi_n">3</span></div>
+            <div class="stat-line"><span>(실제 수행한 실험 횟수):</span> <span id="zombi_total_steps" style="font-weight:normal; color:#d35400;">3</span></div>
+            <div class="stat-desc">힌트 주변으로 경계 축소 & 잉여 데이터 삭제로 연산량 $O(1)$ 방어</div>
         </div>
 
         <button onclick="runStep()">1회 탐색 진행</button>
@@ -116,7 +129,6 @@
 </div>
 
 <script>
-    // 탐색 공간 2배 확장, 해상도 400개
     const X_test = Array.from({length: 400}, (_, i) => i * 20 / 399);
     let true_function, Y_true, needle_pos;
     
@@ -124,29 +136,38 @@
     let X_zombi = [], Y_zombi = [];
     let zombi_bounds = [0, 20];
     
-    // ZoMBI 설정: 단 1개의 최고점 주변으로 +,- 2.0만큼 극단적으로 Zooming
+    // 종료 상태 및 실제 수행 횟수 카운터
+    let std_done = false;
+    let zombi_done = false;
+    let zombi_total_steps = 3; 
+    
     const zombi_topk = 1;       
     const zombi_margin = 2.0;   
-    
-    // 탐색 파라미터 극대화: 일반 BO가 텅 빈 공간의 높은 불확실성(sigma)에 현혹되게 만듦
     const kappa = 5.0;          
+    const threshold = 5.0; // 성능이 5.0 이상이면 바늘을 찾은 것으로 간주하고 정지
 
     function generateEnvironment() {
-        needle_pos = 5.0 + Math.random() * 10.0; // 5 ~ 15 사이
+        needle_pos = 5.0 + Math.random() * 10.0; 
         
-        // 넓은 언덕(힌트, 높이 0.5) + 아주 좁고 거대한 바늘(높이 6.0)
         true_function = (x) => 0.5 * Math.exp(-Math.pow(x - needle_pos, 2) / 10) + 6.0 * Math.exp(-Math.pow(x - needle_pos, 2) / 0.03);
         Y_true = X_test.map(true_function);
         
-        // 초기 관측점 세팅 (힌트를 확실히 주기 위해 1개는 바늘에서 1.5만큼 떨어진 언덕에 배치)
         let hint_pos = needle_pos + (Math.random() > 0.5 ? 1.5 : -1.5);
         let p2 = (needle_pos + 6) % 20;
         let p3 = (needle_pos + 12) % 20;
-        
         let initials = [hint_pos, p2, p3].sort((a,b)=>a-b);
         
         X_std = [...initials]; Y_std = X_std.map(true_function);
         X_zombi = [...initials]; Y_zombi = X_zombi.map(true_function);
+        
+        std_done = false;
+        zombi_done = false;
+        zombi_total_steps = 3;
+        
+        document.getElementById('std_status').innerHTML = "탐색 중... 🔍";
+        document.getElementById('std_status').style.color = "#7f8c8d";
+        document.getElementById('zombi_status').innerHTML = "탐색 중... 🔍";
+        document.getElementById('zombi_status').style.color = "#7f8c8d";
     }
 
     function computeGP(x_train, y_train) {
@@ -177,7 +198,6 @@
     }
 
     function applyZoMBILogic() {
-        // 최고 성능 점 1개(topk=1) 주변으로 탐색 반경(Margin 2.0) 설정
         let max_y = Math.max(...Y_zombi);
         let best_x = X_zombi[Y_zombi.indexOf(max_y)];
         
@@ -185,7 +205,6 @@
         let max_X = best_x + zombi_margin;
         zombi_bounds = [Math.max(0, min_X), Math.min(20, max_X)];
         
-        // 메모리 삭제 (Purging): 경계 밖에 있는 데이터는 깔끔하게 지워버림
         let nX = [], nY = [];
         for(let i=0; i<X_zombi.length; i++) {
             if(X_zombi[i] >= zombi_bounds[0] && X_zombi[i] <= zombi_bounds[1]) {
@@ -205,32 +224,46 @@
     let next_cand_zombi = null;
 
     function updateCharts() {
+        // --- Standard BO ---
         let gp_std = computeGP(X_std, Y_std);
         let acq_std = gp_std.mean.map((m, i) => m + kappa * gp_std.std[i]);
-        next_cand_std = X_test[acq_std.indexOf(Math.max(...acq_std))];
         
+        if (std_done) {
+            acq_std = acq_std.map(() => null); // 종료 시 획득 함수 숨김
+            next_cand_std = null;
+        } else {
+            next_cand_std = X_test[acq_std.indexOf(Math.max(...acq_std))];
+        }
+        
+        // --- ZoMBI ---
         let gp_zombi = computeGP(X_zombi, Y_zombi);
         let acq_zombi = [];
         let max_acq_z = -Infinity, max_idx_z = 0;
         
-        for(let i=0; i<X_test.length; i++) {
-            // ZoMBI는 경계 밖의 불확실성은 아예 계산도 안하고 무시함
-            if(X_test[i] < zombi_bounds[0] || X_test[i] > zombi_bounds[1]) {
-                acq_zombi.push(null); 
-            } else {
-                let val = gp_zombi.mean[i] + kappa * gp_zombi.std[i];
-                acq_zombi.push(val);
-                if(val > max_acq_z) { max_acq_z = val; max_idx_z = i; }
+        if (zombi_done) {
+            acq_zombi = X_test.map(() => null);
+            next_cand_zombi = null;
+        } else {
+            for(let i=0; i<X_test.length; i++) {
+                if(X_test[i] < zombi_bounds[0] || X_test[i] > zombi_bounds[1]) {
+                    acq_zombi.push(null); 
+                } else {
+                    let val = gp_zombi.mean[i] + kappa * gp_zombi.std[i];
+                    acq_zombi.push(val);
+                    if(val > max_acq_z) { max_acq_z = val; max_idx_z = i; }
+                }
             }
+            next_cand_zombi = X_test[max_idx_z];
         }
-        next_cand_zombi = X_test[max_idx_z];
 
+        // --- 텍스트 업데이트 ---
         document.getElementById('std_best').innerText = Math.max(...Y_std).toFixed(3);
         document.getElementById('std_n').innerText = X_std.length;
         document.getElementById('zombi_best').innerText = Math.max(...Y_zombi).toFixed(3);
         document.getElementById('zombi_n').innerText = X_zombi.length;
-        document.getElementById('zombi_bounds').innerText = `[${zombi_bounds[0].toFixed(2)}, ${zombi_bounds[1].toFixed(2)}]`;
+        document.getElementById('zombi_total_steps').innerText = zombi_total_steps;
 
+        // --- 차트 렌더링 ---
         const layout_common = { grid: {rows: 2, columns: 1, pattern: 'independent'}, yaxis: { domain: [0.35, 1], title: '성능 예측', range: [-1, 7] }, xaxis: { range: [0, 20] }, margin: {l: 50, r: 20, b: 30, t: 30}, showlegend: false };
         
         const layout_std = { ...layout_common, yaxis2: { domain: [0, 0.25], title: 'Acq (Std)' }, title: {text: '1. 일반 BO (텅 빈 공간에 집착하며 헛스윙)', font: {size: 16, color: '#2980b9'}} };
@@ -240,38 +273,59 @@
 
         const trace_true = { x: X_test, y: Y_true, mode: 'lines', line: { dash: 'dash', color: 'rgba(0,0,0,0.15)' } };
         
+        // Std Traces
         const t_m_s = { x: X_test, y: gp_std.mean, mode: 'lines', line: { color: '#3498db', width: 2 } };
         const t_u_s = { x: X_test.concat(X_test.slice().reverse()), y: gp_std.mean.map((m,i)=>m+2*gp_std.std[i]).concat(gp_std.mean.map((m,i)=>m-2*gp_std.std[i]).reverse()), fill: 'toself', fillcolor: 'rgba(52, 152, 219, 0.2)', line: {color: 'transparent'} };
         const t_o_s = { x: X_std, y: Y_std, mode: 'markers', marker: { color: 'black', size: 9, line: {color:'white', width:1} } };
         const t_a_s = { x: X_test, y: acq_std, mode: 'lines', fill: 'tozeroy', fillcolor: 'rgba(52, 152, 219, 0.2)', line: { color: '#3498db' }, yaxis: 'y2' };
-        const t_st_s = { x: [next_cand_std], y: [gp_std.mean[acq_std.indexOf(Math.max(...acq_std))]], mode: 'markers', marker: { symbol: 'star', size: 16, color: 'red' } };
+        const t_st_s = { x: next_cand_std ? [next_cand_std] : [], y: next_cand_std ? [gp_std.mean[acq_std.indexOf(Math.max(...acq_std))]] : [], mode: 'markers', marker: { symbol: 'star', size: 16, color: 'red' } };
 
+        // ZoMBI Traces
         const t_m_z = { x: X_test, y: gp_zombi.mean, mode: 'lines', line: { color: '#e67e22', width: 2 } };
         const t_u_z = { x: X_test.concat(X_test.slice().reverse()), y: gp_zombi.mean.map((m,i)=>m+2*gp_zombi.std[i]).concat(gp_zombi.mean.map((m,i)=>m-2*gp_zombi.std[i]).reverse()), fill: 'toself', fillcolor: 'rgba(230, 126, 34, 0.2)', line: {color: 'transparent'} };
         const t_o_z = { x: X_zombi, y: Y_zombi, mode: 'markers', marker: { color: 'black', size: 9, line: {color:'white', width:1} } };
         const t_a_z = { x: X_test, y: acq_zombi, mode: 'lines', fill: 'tozeroy', fillcolor: 'rgba(230, 126, 34, 0.2)', line: { color: '#e67e22' }, yaxis: 'y2', connectgaps: false };
-        const t_st_z = { x: [next_cand_zombi], y: [gp_zombi.mean[max_idx_z]], mode: 'markers', marker: { symbol: 'star', size: 16, color: 'red' } };
+        const t_st_z = { x: next_cand_zombi ? [next_cand_zombi] : [], y: next_cand_zombi ? [gp_zombi.mean[max_idx_z]] : [], mode: 'markers', marker: { symbol: 'star', size: 16, color: 'red' } };
 
         Plotly.react('plot-std', [t_u_s, trace_true, t_m_s, t_o_s, t_a_s, t_st_s], layout_std, {displayModeBar: false});
         Plotly.react('plot-zombi', [t_u_z, trace_true, t_m_z, t_o_z, t_a_z, t_st_z], layout_zombi, {displayModeBar: false});
     }
 
     function runStep() {
-        X_std.push(next_cand_std);
-        Y_std.push(true_function(next_cand_std));
+        if (!std_done && next_cand_std !== null) {
+            X_std.push(next_cand_std);
+            let y_val = true_function(next_cand_std);
+            Y_std.push(y_val);
+            if (y_val >= threshold) {
+                std_done = true;
+                document.getElementById('std_status').innerHTML = "🎉 바늘 발견! (종료)";
+                document.getElementById('std_status').style.color = "#27ae60";
+            }
+        }
 
-        if(next_cand_zombi !== null) {
+        if (!zombi_done && next_cand_zombi !== null) {
             X_zombi.push(next_cand_zombi);
-            Y_zombi.push(true_function(next_cand_zombi));
+            let y_val = true_function(next_cand_zombi);
+            Y_zombi.push(y_val);
+            zombi_total_steps++;
+            
+            if (y_val >= threshold) {
+                zombi_done = true;
+                document.getElementById('zombi_status').innerHTML = "🎉 바늘 발견! (종료)";
+                document.getElementById('zombi_status').style.color = "#27ae60";
+            }
+            applyZoMBILogic(); 
         }
         
-        applyZoMBILogic(); 
         updateCharts();
     }
 
     function runMultiStep(times) {
         let i = 0;
         function step() {
+            // 둘 다 찾았으면 애니메이션 조기 종료
+            if (std_done && zombi_done) return;
+            
             runStep(); i++;
             if (i < times) setTimeout(step, 400);
         }
