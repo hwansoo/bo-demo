@@ -45,8 +45,8 @@
         <div class="subtitle">(Needle-in-a-Haystack Problem)</div>
         
         <div class="description">
-            대부분의 영역은 성능이 0 근처지만, <strong>어딘가에 아주 좁고 뾰족한 최적점(바늘)</strong>이 숨어있습니다.<br>
-            현재 초기 실험 3번을 진행했지만, 모두 바늘을 비껴가서 꽝(0)이 나왔습니다. 모델은 바늘의 존재를 어떻게 눈치챌 수 있을까요?
+            대부분의 영역은 성능이 0 근처지만, <strong>어딘가에 아주 좁고 뾰족한 최적점(바늘)</strong>이 숨어있습니다. 새로 시작할 때마다 바늘의 위치는 무작위로 바뀝니다.<br><br>
+            초기 실험 3번은 모두 바늘을 교묘하게 비껴갔습니다. 모델은 바늘의 존재를 어떻게 눈치채고 찾아낼 수 있을까요?
         </div>
 
         <div class="length-box">
@@ -81,18 +81,45 @@
     // 1. 초기 설정 (바늘을 세밀하게 그리기 위해 점을 250개로 촘촘하게 설정)
     const X_test = Array.from({length: 250}, (_, i) => i * 10 / 249);
     
-    // Needle-in-a-haystack 함수: 기본적으로 약간의 굴곡(0 근처) + 특정 위치(x=6.8)에 아주 좁고 높은 피크
-    const true_function = (x) => 0.1 * Math.sin(x) + 3.0 * Math.exp(-40 * Math.pow(x - 6.8, 2));
-    const Y_true = X_test.map(true_function);
-
+    let needle_pos = 5.0;
+    let true_function;
+    let Y_true = [];
+    
     let X_train = [];
     let Y_train = [];
     let next_candidate = null;
 
-    // GP 모델 계산 (Matérn 5/2 커널 사용하되, Length Scale(l)을 UI에서 받아옴)
+    // 무작위 환경 생성 함수
+    function generateEnvironment() {
+        // 바늘 위치를 1.0 ~ 9.0 사이의 무작위 값으로 설정
+        needle_pos = 1.0 + Math.random() * 8.0;
+        
+        // 새로운 바늘 위치를 반영한 실제 함수 정의
+        true_function = (x) => 0.1 * Math.sin(x) + 3.0 * Math.exp(-40 * Math.pow(x - needle_pos, 2));
+        Y_true = X_test.map(true_function);
+        
+        // 바늘을 교묘하게 비껴가는 초기 관측점 3개 무작위 생성
+        X_train = [];
+        while(X_train.length < 3) {
+            let candidate = Math.random() * 10;
+            // 바늘의 영향을 받지 않는 곳(거리 1.0 이상)이면서, 서로 겹치지 않게(거리 1.5 이상) 배치
+            if (Math.abs(candidate - needle_pos) > 1.0) {
+                let tooClose = X_train.some(x => Math.abs(x - candidate) < 1.5);
+                if (!tooClose) {
+                    X_train.push(candidate);
+                }
+            }
+        }
+        
+        // X 좌표 순으로 정렬 (보기 좋게)
+        X_train.sort((a, b) => a - b);
+        Y_train = X_train.map(true_function);
+    }
+
+    // GP 모델 계산
     function computeGP(l_scale) {
         const sigma_f = 1.0; 
-        const sigma_n = 0.01; // 노이즈를 작게 줘서 불확실성 증폭 효과를 명확히 함
+        const sigma_n = 0.01; 
         const N = X_train.length; 
         const M = X_test.length;
 
@@ -126,11 +153,9 @@
     }
 
     function restart() {
-        // 초기 실험 3개 (바늘이 있는 6.8을 교묘하게 비껴간 위치들)
-        X_train = [1.5, 4.5, 9.0]; 
-        Y_train = X_train.map(true_function);
+        generateEnvironment(); // 환경 무작위 재생성
         
-        // 슬라이더 초기화
+        // 슬라이더 값을 원래대로 초기화 (길이 척도를 다시 크게 둠으로써 바늘을 못 찾게 만듦)
         document.getElementById('lSlider').value = 1.5;
         document.getElementById('kappaSlider').value = 3.0;
         
@@ -185,6 +210,7 @@
         }
     }
 
+    // 초기 실행
     restart();
 </script>
 
