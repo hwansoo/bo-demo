@@ -389,8 +389,8 @@
     function sampleNextPoint() {
         if (next_x_candidate !== null) {
             X_train.push(next_x_candidate);
-            Y_train.push(f1_true(next_x_candidate));
-            Y_train.push(f2_true(next_x_candidate));
+            Y1_train.push(f1_true(next_x_candidate));
+            Y2_train.push(f2_true(next_x_candidate));
             updateCharts();
         }
     }
