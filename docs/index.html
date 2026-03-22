@@ -269,6 +269,7 @@
         <div class="controls">
             <button onclick="addRandomPointStep2()">임의의 위치에 실험 추가해보기</button>
             <button class="btn-reset" onclick="resetStep2()">초기화</button>
+            <p>현재 실험 횟수: <span id="count2">2</span>번</p>
         </div>
         <div id="plot2" class="plot"></div>
     </div>
@@ -425,12 +426,18 @@
     function resetStep2() {
         s2_x = [2, 8]; 
         s2_y = s2_x.map(true_function);
+        if (document.getElementById('count2')) {
+            document.getElementById('count2').innerText = s2_x.length;
+        }
         renderStep2();
     }
     function addRandomPointStep2() {
         let new_x = Math.random() * 10;
         s2_x = [...s2_x, new_x];
         s2_y = [...s2_y, true_function(new_x)];
+        if (document.getElementById('count2')) {
+            document.getElementById('count2').innerText = s2_x.length;
+        }
         renderStep2();
     }
     function renderStep2() {
